@@ -1,0 +1,10 @@
+{{! templates/email/welcome.hbs }}
+    <div class="welcome-container">
+      <h1 style="color: #16a34a;">¡Bienvenido al Sistema Ganadero UJAT! 🐄</h1>
+      <p>Estimado/a <strong>{{firstName}}</strong>,</p>
+      <p>Tu cuenta ha sido creada exitosamente. Ahora puedes gestionar tu ganado de manera eficiente y segura.</p>
+      
+      {{> button text="Acceder al sistema" url=(absoluteUrl "/dashboard") }}
+      
+      <p>© {{year}} Universidad Juárez Autónoma de Tabasco</p>
+    </div>

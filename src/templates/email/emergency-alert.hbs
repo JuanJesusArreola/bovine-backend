@@ -1,0 +1,26 @@
+{{! templates/email/emergency-alert.hbs }}
+    <div class="emergency-alert-container">
+      <h1 style="color: #7f1d1d;">🚨 ALERTA DE EMERGENCIA</h1>
+      <p>Hola <strong>{{firstName}}</strong>,</p>
+      
+      <div style="background: #fee2e2; padding: 20px; border-radius: 8px; margin: 20px 0; border: 2px solid #dc2626;">
+        <h3 style="color: #991b1b; margin-top: 0;">{{alertTitle}}</h3>
+        <p style="font-size: 16px;">{{alertMessage}}</p>
+        
+        {{#if details}}
+        <p style="margin: 10px 0 0 0;"><strong>Detalles:</strong> {{details}}</p>
+        {{/if}}
+        
+        {{#if location}}
+        <p style="margin: 10px 0 0 0;"><strong>Ubicación:</strong> {{location}}</p>
+        {{/if}}
+        
+        {{#if timestamp}}
+        <p style="margin: 10px 0 0 0;"><strong>Hora:</strong> {{formatDate timestamp}} {{formatTime timestamp}}</p>
+        {{/if}}
+      </div>
+      
+      <p style="color: #dc2626; font-weight: bold;">Se requiere acción inmediata.</p>
+      
+      {{> button text="Ver emergencia" url=actionUrl }}
+    </div>

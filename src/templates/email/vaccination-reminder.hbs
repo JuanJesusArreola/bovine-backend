@@ -1,0 +1,17 @@
+{{! templates/email/vaccination-reminder.hbs }}
+    <div class="vaccination-container">
+      <h1 style="color: #3b82f6;">🏥 Recordatorio de Vacunación</h1>
+      <p>Estimado/a <strong>{{ownerName}}</strong>,</p>
+      
+      <div style="background: #f0f9ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h3 style="color: #0369a1; margin-top: 0;">Detalles de la vacunación</h3>
+        <p><strong>Bovino:</strong> {{bovineEarTag}} {{#if bovineName}}({{bovineName}}){{/if}}</p>
+        <p><strong>Vacuna:</strong> {{vaccineType}}</p>
+        <p><strong>Fecha programada:</strong> {{formatDate dueDate 'long'}}</p>
+        <p><strong>Días restantes:</strong> {{daysUntilDue}}</p>
+        <p><strong>Veterinario asignado:</strong> {{veterinarianName}}</p>
+        <p><strong>Rancho:</strong> {{ranchName}}</p>
+      </div>
+      
+      {{> button text="Ver calendario" url=(absoluteUrl "/calendar") }}
+    </div>

@@ -1,0 +1,28 @@
+{{! templates/email/weekly-report.hbs }}
+    <div class="weekly-report-container">
+      <h1 style="color: #059669;">📊 Reporte Semanal</h1>
+      <p>Estimado/a <strong>{{ownerName}}</strong>,</p>
+      <p>Aquí está el resumen semanal de <strong>{{ranchName}}</strong> ({{formatDate period.start}} - {{formatDate period.end}}):</p>
+      
+      <div style="background: #f0f9ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h3 style="color: #0369a1; margin-top: 0;">Estadísticas Generales</h3>
+        <ul style="list-style: none; padding: 0;">
+          <li>📊 Total de bovinos: {{statistics.totalBovines}}</li>
+          <li>✅ Bovinos sanos: {{statistics.healthyBovines}} ({{formatPercent healthPercentage}})</li>
+          <li>💉 Vacunaciones completadas: {{statistics.vaccinationsCompleted}}</li>
+          <li>⏰ Vacunaciones pendientes: {{statistics.upcomingVaccinations}}</li>
+          <li>🐄 Nuevos nacimientos: {{statistics.births}}</li>
+        </ul>
+      </div>
+      
+      <div style="background: #fef7cd; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h3 style="color: #a16207; margin-top: 0;">Alertas</h3>
+        <ul style="list-style: none; padding: 0;">
+          <li>🚨 Alertas críticas: {{alerts.criticalAlerts}}</li>
+          <li>💉 Vacunaciones vencidas: {{alerts.vaccinationsDue}}</li>
+          <li>🏥 Problemas de salud: {{alerts.healthConcerns}}</li>
+        </ul>
+      </div>
+      
+      {{> button text="Ver reporte completo" url=(absoluteUrl "/reports/weekly") }}
+    </div>

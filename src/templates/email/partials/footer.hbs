@@ -1,0 +1,15 @@
+{{! templates/email/partials/footer.hbs }}
+<div style="text-align: center; padding: 20px; color: #6b7280; font-size: 12px;">
+  <p style="margin: 0;">
+    © {{year}} Universidad Juárez Autónoma de Tabasco<br>
+    Sistema Ganadero UJAT - Gestión Inteligente de Ganado
+  </p>
+  <p style="margin: 10px 0 0 0;">
+    Este es un email automático, por favor no respondas a este mensaje.
+  </p>
+  {{#if showUnsubscribe}}
+  <p style="margin: 10px 0 0 0;">
+    <a href="{{unsubscribeUrl}}" style="color: #6b7280;">Cancelar suscripción</a>
+  </p>
+  {{/if}}
+</div>
