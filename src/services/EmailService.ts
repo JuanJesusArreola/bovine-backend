@@ -174,7 +174,10 @@ export class EmailService extends EventEmitter {
                 await this.sendEmailImmediately(options);
             }
         );
-        this.initialize();
+        void this.initialize().catch((error) => {
+            this.isInitialized = false;
+            logger.error('EmailService no pudo inicializarse; el backend continuará sin email', this.context, {}, error as Error);
+        });
     }
 
     /**
@@ -203,7 +206,7 @@ export class EmailService extends EventEmitter {
             });
         } catch (error) {
             logger.error('Error inicializando EmailService', this.context, {}, error as Error);
-            throw new EmailError('INITIALIZATION_FAILED', 'No se pudo inicializar el servicio de email');
+            throw new EmailError('INITIALIZATION_FAILED', 'No se pudo inicializar el servicio de email', 500, error as Error);
         }
     }
 

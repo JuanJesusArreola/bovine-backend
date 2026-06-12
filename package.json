@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node dist/index.js",
     "dev": "nodemon src/index.ts",
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-assets.js",
     "build:watch": "tsc -w",
     "clean": "rimraf dist",
     "lint": "eslint src/**/*.ts",
