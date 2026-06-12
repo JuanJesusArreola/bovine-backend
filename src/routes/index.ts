@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
+import { env } from '../config/env';
 
 // Importaciones corregidas de middleware
 import { authenticateToken } from '../middleware/auth';
@@ -103,14 +104,16 @@ const corsOptions = {
     if (!origin) return callback(null, true);
     
     // Lista de dominios permitidos para la aplicación ganadera
+    const configuredOrigins = env('ALLOWED_ORIGINS') || env('PROD_CORS_ORIGINS') || env('FRONTEND_URL') || '';
     const allowedOrigins = [
       'http://localhost:3000',
       'http://localhost:5173',
       'https://ganado-app.com',
       'https://www.ganado-app.com',
       'https://app.ganado-ujat.edu.mx',
+      ...configuredOrigins.split(','),
       // Agregar más dominios según necesidad
-    ];
+    ].map((allowedOrigin) => allowedOrigin.trim()).filter(Boolean);
     
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
