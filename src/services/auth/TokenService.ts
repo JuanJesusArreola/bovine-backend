@@ -10,6 +10,7 @@ import { TokenBlacklist, TokenType, RevocationReason } from '../../models/TokenB
 import { EmailVerificationToken } from '../../models/EmailVerificationToken';
 import PasswordResetToken from '../../models/PasswordResetToken';
 import sequelize from '../../config/database';
+import { env, productionSecret } from '../../config/env';
 
 // ============================================================================
 // INTERFACES
@@ -40,10 +41,10 @@ export interface EmailVerificationResult {
 // CONFIGURACIÓN
 // ============================================================================
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-default-secret-key';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
-const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
+const JWT_SECRET = productionSecret('JWT_SECRET', ['JWT_ACCESS_SECRET', 'PROD_JWT_SECRET']);
+const JWT_REFRESH_SECRET = productionSecret('JWT_REFRESH_SECRET', ['PROD_JWT_REFRESH_SECRET']);
+const JWT_EXPIRES_IN = env('JWT_EXPIRES_IN', '24h')!;
+const JWT_REFRESH_EXPIRES_IN = env('JWT_REFRESH_EXPIRES_IN', '7d')!;
 
 // ============================================================================
 // SERVICIO PRINCIPAL

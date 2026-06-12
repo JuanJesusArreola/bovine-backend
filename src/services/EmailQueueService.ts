@@ -32,6 +32,7 @@ export class EmailQueueService extends EventEmitter {
     private readonly context = 'EmailQueueService';
     private queue: Bull.Queue<EmailJobData>;
     private isProcessing = false;
+    private isAvailable = true;
 
     constructor(redisConfig: any, sendEmailCallback?: (options: EmailOptions) => Promise<void>) {
         super();
@@ -53,8 +54,14 @@ export class EmailQueueService extends EventEmitter {
      */
     private setupEventHandlers(): void {
         this.queue.on('error', (error) => {
+            this.isAvailable = false;
             logger.error('Error en cola de emails', this.context, {}, error);
-            this.emit('error', error);
+            this.emit('queueError', error);
+        });
+
+        this.queue.on('ready', () => {
+            this.isAvailable = true;
+            logger.info('Cola de emails conectada a Redis', this.context);
         });
 
         this.queue.on('failed', (job, error) => {
@@ -159,6 +166,10 @@ export class EmailQueueService extends EventEmitter {
         jobData: Omit<EmailJobData, 'attempts' | 'createdAt'>
     ): Promise<Bull.Job<EmailJobData>> {
         try {
+            if (!this.isAvailable) {
+                throw new Error('La cola de emails no está disponible');
+            }
+
             const priority = this.getPriorityValue(jobData.priority);
             const retryConfig = RETRY_CONFIG[jobData.priority];
 
@@ -214,6 +225,10 @@ export class EmailQueueService extends EventEmitter {
         state: string;
         progress: number;
     }> {
+        if (!this.isAvailable) {
+            return { job: null, state: 'queue_unavailable', progress: 0 };
+        }
+
         const job = await this.queue.getJob(jobId);
 
         if (!job) {
@@ -230,6 +245,10 @@ export class EmailQueueService extends EventEmitter {
      * Cancela un job pendiente
      */
     async cancelJob(jobId: string): Promise<boolean> {
+        if (!this.isAvailable) {
+            return false;
+        }
+
         const job = await this.queue.getJob(jobId);
 
         if (!job) {
@@ -249,22 +268,38 @@ export class EmailQueueService extends EventEmitter {
      * Obtiene estadísticas de la cola
      */
     async getStats(): Promise<QueueStats> {
-        const [waiting, active, completed, failed, delayed, paused] = await Promise.all([
-            this.queue.getWaitingCount(),
-            this.queue.getActiveCount(),
-            this.queue.getCompletedCount(),
-            this.queue.getFailedCount(),
-            this.queue.getDelayedCount(),
-            this.queue.getPausedCount()
-        ]);
+        if (!this.isAvailable) {
+            return { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0, paused: 0 };
+        }
 
-        return { waiting, active, completed, failed, delayed, paused };
+        try {
+            const [waiting, active, completed, failed, delayed, paused] = await Promise.all([
+                this.queue.getWaitingCount(),
+                this.queue.getActiveCount(),
+                this.queue.getCompletedCount(),
+                this.queue.getFailedCount(),
+                this.queue.getDelayedCount(),
+                this.queue.getPausedCount()
+            ]);
+
+            return { waiting, active, completed, failed, delayed, paused };
+        } catch (error) {
+            this.isAvailable = false;
+            logger.warn('No se pudieron leer estadísticas de la cola de emails', this.context, {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0, paused: 0 };
+        }
     }
 
     /**
      * Limpia jobs antiguos
      */
     async clean(age: number = API_LIMITS.QUEUE_CLEANUP_DAYS * 24 * 60 * 60 * 1000): Promise<void> {
+        if (!this.isAvailable) {
+            return;
+        }
+
         await this.queue.clean(age, 'completed');
         await this.queue.clean(age, 'failed');
 

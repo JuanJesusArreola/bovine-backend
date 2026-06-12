@@ -4,6 +4,7 @@ import { tokenService } from '../services/auth';
 import { permissionService } from '../services/permission';
 import User, { UserRole } from '../models/User';
 import logger from '../utils/logger';
+import { env, productionSecret } from '../config/env';
 
 /*
 // Enums y tipos para usuarios
@@ -77,8 +78,8 @@ declare global {
 }
 
 // Configuración JWT desde variables de entorno
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-for-cattle-management';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
+const JWT_SECRET = productionSecret('JWT_SECRET', ['JWT_ACCESS_SECRET', 'PROD_JWT_SECRET']);
+const JWT_EXPIRES_IN = env('JWT_EXPIRES_IN', '24h')!;
 
 // Interface simple para el payload del JWT
 interface TokenPayload {

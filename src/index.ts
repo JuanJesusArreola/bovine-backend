@@ -42,6 +42,19 @@ const server = createServer(app);
 const PORT = parseInt(process.env.PORT || '5000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 
+const getAllowedOrigins = (): string[] => {
+  const configuredOrigins = process.env.ALLOWED_ORIGINS || process.env.PROD_CORS_ORIGINS || process.env.FRONTEND_URL || '';
+  return [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://localhost:4173',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:4173',
+    ...configuredOrigins.split(','),
+  ].map((origin) => origin.trim()).filter(Boolean);
+};
+
 // ============================================================================
 // 🔧 ARREGLO 2: CORS SUPER PERMISIVO PRIMERO (ANTES DE HELMET)
 // ============================================================================
@@ -58,22 +71,13 @@ const corsOptions = {
     }
 
     // Orígenes permitidos expandidos
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://localhost:4173',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:5173',
-      'http://127.0.0.1:4173',
-      process.env.FRONTEND_URL
-    ].filter(Boolean);
+    const allowedOrigins = getAllowedOrigins();
 
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      console.log(`🚫 Origen rechazado: ${origin} - PERO PERMITIDO EN DESARROLLO`);
-      // EN DESARROLLO, PERMITIR DE TODAS FORMAS
-      callback(null, true);
+      console.log(`Origen rechazado por CORS: ${origin}`);
+      callback(new Error(`Origen no permitido por CORS: ${origin}`), false);
     }
   },
   credentials: true,

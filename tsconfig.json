@@ -27,6 +27,7 @@
     "strict": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
+    "ignoreDeprecations": "5.0",
     
     // Configuraciones adicionales para compatibilidad
     "declaration": false,

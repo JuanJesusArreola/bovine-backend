@@ -22,6 +22,7 @@
 import { createClient, RedisClientType } from 'redis';
 import logger from '../utils/logger';
 import { ensureError } from '../utils/errorUtils';
+import { env, getRedisUrl } from '../config/env';
 
 // ============================================================================
 // CONFIGURACIÓN
@@ -29,6 +30,7 @@ import { ensureError } from '../utils/errorUtils';
 
 const KEY_PREFIX = process.env.REDIS_PREFIX || 'bovino:cache:';
 const BACKEND = (process.env.CACHE_BACKEND || 'auto').toLowerCase(); // 'redis' | 'memory' | 'auto'
+const REDIS_URL = getRedisUrl();
 
 // ============================================================================
 // IN-MEMORY FALLBACK
@@ -115,9 +117,10 @@ export class CacheService {
 
     try {
       this.redis = createClient({
+        ...(REDIS_URL ? { url: REDIS_URL } : {}),
         socket: {
-          host: process.env.REDIS_HOST || 'localhost',
-          port: parseInt(process.env.REDIS_PORT || '6379'),
+          host: env('REDIS_HOST', 'localhost')!,
+          port: parseInt(env('REDIS_PORT', '6379')!),
           reconnectStrategy: (retries) => {
             if (retries > 5) {
               logger.warn(
@@ -130,9 +133,9 @@ export class CacheService {
             return Math.min(retries * 500, 3000);
           },
         },
-        username: process.env.REDIS_USERNAME,
-        password: process.env.REDIS_PASSWORD || undefined,
-        database: parseInt(process.env.REDIS_DB || '0'),
+        username: REDIS_URL ? undefined : env('REDIS_USERNAME'),
+        password: REDIS_URL ? undefined : env('REDIS_PASSWORD'),
+        database: REDIS_URL ? undefined : parseInt(env('REDIS_DB', '0')!),
       }) as RedisClientType;
 
       this.redis.on('error', (err) => {

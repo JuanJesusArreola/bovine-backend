@@ -1,15 +1,7 @@
 // services/push.ts
 import * as admin from 'firebase-admin';
 import logger from '../utils/logger';
-
-// Inicializar Firebase Admin SDK
-if (!admin.apps.length) {
-    admin.initializeApp({
-        credential: admin.credential.applicationDefault(),
-        // O con archivo:
-        // credential: admin.credential.cert(require('path/to/service-account.json'))
-    });
-}
+import '../config/firebase';
 
 export interface PushNotification {
     title: string;

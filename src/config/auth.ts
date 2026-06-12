@@ -4,6 +4,8 @@
 // Configuración para JSON Web Tokens, encriptación de passwords y autenticación
 // Maneja generación de tokens, validación y configuraciones de seguridad
 
+import { env, productionSecret } from './env';
+
 // Importaciones condicionales para evitar errores antes de instalar dependencias
 let jwt: any;
 let bcrypt: any;
@@ -81,27 +83,27 @@ enum UserRole {
 const authConfig: AuthConfig = {
   jwt: {
     // Secretos para firmar tokens (deben ser diferentes en producción)
-    accessTokenSecret: process.env.JWT_ACCESS_SECRET || 'cattle_management_access_secret_2025',
-    refreshTokenSecret: process.env.JWT_REFRESH_SECRET || 'cattle_management_refresh_secret_2025',
+    accessTokenSecret: productionSecret('JWT_SECRET', ['JWT_ACCESS_SECRET', 'PROD_JWT_SECRET']),
+    refreshTokenSecret: productionSecret('JWT_REFRESH_SECRET', ['PROD_JWT_REFRESH_SECRET']),
     
     // Duración de los tokens
-    accessTokenExpiration: process.env.JWT_ACCESS_EXPIRATION || '15m',  // 15 minutos
-    refreshTokenExpiration: process.env.JWT_REFRESH_EXPIRATION || '7d', // 7 días
+    accessTokenExpiration: env('JWT_EXPIRES_IN', env('JWT_ACCESS_EXPIRATION', '15m'))!,
+    refreshTokenExpiration: env('JWT_REFRESH_EXPIRES_IN', env('JWT_REFRESH_EXPIRATION', '7d'))!,
     
     // Metadatos del token
-    issuer: process.env.JWT_ISSUER || 'CattleManagement',
-    audience: process.env.JWT_AUDIENCE || 'cattle-users',
+    issuer: env('JWT_ISSUER', 'CattleManagement')!,
+    audience: env('JWT_AUDIENCE', 'cattle-users')!,
     algorithm: 'HS256' // Algoritmo de encriptación
   },
   
   bcrypt: {
-    saltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS || '12') // Rondas de encriptación
+    saltRounds: parseInt(env('BCRYPT_SALT_ROUNDS', '12')!)
   },
   
   session: {
-    maxAttempts: parseInt(process.env.MAX_LOGIN_ATTEMPTS || '5'),        // Intentos máximos de login
-    lockoutDuration: parseInt(process.env.LOCKOUT_DURATION || '900000'), // 15 minutos en ms
-    sessionTimeout: parseInt(process.env.SESSION_TIMEOUT || '3600000')   // 1 hora en ms
+    maxAttempts: parseInt(env('MAX_LOGIN_ATTEMPTS', '5')!),
+    lockoutDuration: parseInt(env('LOCKOUT_DURATION', '900000')!),
+    sessionTimeout: parseInt(env('SESSION_TIMEOUT', '3600000')!)
   },
   
   password: {

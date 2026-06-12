@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { UserRole } from '../models/User';
 import { createClient, RedisClientType } from 'redis';
 import { logMessage, LogLevel } from './logging';
+import { env, getRedisUrl } from '../config/env';
 
 // Interface para configuración de límites
 interface RateLimitConfig {
@@ -144,6 +145,7 @@ const IP_RATE_LIMITS = {
   windowMs: 15 * 60 * 1000,   // 15 minutos
   maxRequests: 100            // 100 requests por IP
 };
+const REDIS_URL = getRedisUrl();
 
 // ============================================================================
 // STORE EN MEMORIA — FALLBACK CUANDO REDIS NO ESTÁ DISPONIBLE
@@ -206,9 +208,10 @@ class RedisRateLimitStore {
 
     try {
       this.client = createClient({
+        ...(REDIS_URL ? { url: REDIS_URL } : {}),
         socket: {
-          host: process.env.REDIS_HOST || 'localhost',
-          port: parseInt(process.env.REDIS_PORT || '6379'),
+          host: env('REDIS_HOST', 'localhost')!,
+          port: parseInt(env('REDIS_PORT', '6379')!),
 
           /**
            * reconnectStrategy: función que decide cuánto esperar
@@ -226,7 +229,7 @@ class RedisRateLimitStore {
                 LogLevel.ERROR,
                 'redis_reconnect_failed',
                 `Redis: máximo de reconexiones alcanzado (${retries}). Usando fallback en memoria.`,
-                { retries, host: process.env.REDIS_HOST }
+                { retries, host: env('REDIS_HOST') || REDIS_URL }
               );
               return false; // Dejar de reintentar
             }
@@ -246,9 +249,9 @@ class RedisRateLimitStore {
         // que usa Bull, sesiones, caché, etc. en el mismo servidor Redis.
         // ganadero:rl:user:abc123:auth  →  claramente es rate limiting
         // abc123:auth                  →  ambiguo, podría colisionar
-        username: process.env.REDIS_USERNAME,
-        password: process.env.REDIS_PASSWORD || undefined,
-        database: parseInt(process.env.REDIS_DB || '0'),
+        username: REDIS_URL ? undefined : env('REDIS_USERNAME'),
+        password: REDIS_URL ? undefined : env('REDIS_PASSWORD'),
+        database: REDIS_URL ? undefined : parseInt(env('REDIS_DB', '0')!),
       }) as RedisClientType;
       this.client.on('connect', () => {
         this.isConnected = true;
@@ -258,7 +261,7 @@ class RedisRateLimitStore {
           LogLevel.INFO,
           'redis_connected',
           'Rate limiter: conectado a Redis correctamente',
-          { host: process.env.REDIS_HOST, db: process.env.REDIS_DB }
+          { host: env('REDIS_HOST') || REDIS_URL, db: env('REDIS_DB') }
         );
       });
 

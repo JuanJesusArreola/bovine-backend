@@ -4,6 +4,7 @@
 
 import { Options } from 'sequelize';
 import * as dotenv from 'dotenv';
+import { buildPostgresConfig, env, productionSecret } from './env';
 
 // Cargar variables de entorno
 dotenv.config();
@@ -94,11 +95,12 @@ const environments: Record<Environment, EnvironmentConfig> = {
   development: {
     database: {
       ...baseDatabaseConfig,
-      host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT || '5432'),
-      database: process.env.DB_NAME || 'cattle_management_dev',
-      username: process.env.DB_USERNAME || 'postgres',
-      password: process.env.DB_PASSWORD || 'password',
+      ...buildPostgresConfig(''),
+      host: env('DB_HOST', 'localhost'),
+      port: parseInt(env('DB_PORT', '5432')!),
+      database: env('DB_NAME', 'cattle_management_dev'),
+      username: env('DB_USERNAME', env('DB_USER', 'postgres')),
+      password: env('DB_PASSWORD', 'password'),
       logging: console.log, // Mostrar SQL en desarrollo
       pool: {
         max: 5,
@@ -117,10 +119,10 @@ const environments: Record<Environment, EnvironmentConfig> = {
     },
     security: {
       jwt: {
-        secret: process.env.JWT_SECRET || 'dev_secret_key_change_in_production',
-        refreshSecret: process.env.JWT_REFRESH_SECRET || 'dev_refresh_secret_key',
-        expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-        refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d'
+        secret: productionSecret('JWT_SECRET', ['PROD_JWT_SECRET'], 'dev_secret_key_change_in_production'),
+        refreshSecret: productionSecret('JWT_REFRESH_SECRET', ['PROD_JWT_REFRESH_SECRET'], 'dev_refresh_secret_key'),
+        expiresIn: env('JWT_EXPIRES_IN', '7d')!,
+        refreshExpiresIn: env('JWT_REFRESH_EXPIRES_IN', '30d')!
       },
       bcrypt: {
         saltRounds: 10
@@ -216,11 +218,12 @@ const environments: Record<Environment, EnvironmentConfig> = {
   staging: {
     database: {
       ...baseDatabaseConfig,
-      host: process.env.STAGING_DB_HOST || 'localhost',
-      port: parseInt(process.env.STAGING_DB_PORT || '5432'),
-      database: process.env.STAGING_DB_NAME || 'cattle_management_staging',
-      username: process.env.STAGING_DB_USER || 'postgres',
-      password: process.env.STAGING_DB_PASSWORD || '',
+      ...buildPostgresConfig('STAGING_'),
+      host: env('STAGING_DB_HOST', 'localhost'),
+      port: parseInt(env('STAGING_DB_PORT', '5432')!),
+      database: env('STAGING_DB_NAME', 'cattle_management_staging'),
+      username: env('STAGING_DB_USER', 'postgres'),
+      password: env('STAGING_DB_PASSWORD', ''),
       logging: false,
       pool: {
         max: 10,
@@ -239,7 +242,7 @@ const environments: Record<Environment, EnvironmentConfig> = {
       port: parseInt(process.env.STAGING_PORT || '3001'),
       host: process.env.STAGING_HOST || '0.0.0.0',
       cors: {
-        origin: process.env.STAGING_CORS_ORIGINS?.split(',') || ['https://staging.ganaderia.mx'],
+        origin: env('STAGING_CORS_ORIGINS')?.split(',') || ['https://staging.ganaderia.mx'],
         credentials: true
       }
     },
@@ -284,11 +287,7 @@ const environments: Record<Environment, EnvironmentConfig> = {
   production: {
     database: {
       ...baseDatabaseConfig,
-      host: process.env.PROD_DB_HOST || '',
-      port: parseInt(process.env.PROD_DB_PORT || '5432'),
-      database: process.env.PROD_DB_NAME || '',
-      username: process.env.PROD_DB_USER || '',
-      password: process.env.PROD_DB_PASSWORD || '',
+      ...buildPostgresConfig('PROD_'),
       logging: false,
       pool: {
         max: 20,
@@ -307,16 +306,21 @@ const environments: Record<Environment, EnvironmentConfig> = {
       port: parseInt(process.env.PORT || '3001'),
       host: process.env.HOST || '0.0.0.0',
       cors: {
-        origin: process.env.PROD_CORS_ORIGINS?.split(',') || ['https://ganaderia.mx'],
+        origin: (
+          env('PROD_CORS_ORIGINS') ||
+          env('ALLOWED_ORIGINS') ||
+          env('FRONTEND_URL') ||
+          'https://ganaderia.mx'
+        ).split(',').map((origin) => origin.trim()).filter(Boolean),
         credentials: true
       }
     },
     security: {
       jwt: {
-        secret: process.env.PROD_JWT_SECRET || '',
-        refreshSecret: process.env.PROD_JWT_REFRESH_SECRET || '',
-        expiresIn: process.env.PROD_JWT_EXPIRES_IN || '1h',
-        refreshExpiresIn: process.env.PROD_JWT_REFRESH_EXPIRES_IN || '7d'
+        secret: productionSecret('JWT_SECRET', ['PROD_JWT_SECRET']),
+        refreshSecret: productionSecret('JWT_REFRESH_SECRET', ['PROD_JWT_REFRESH_SECRET']),
+        expiresIn: env('JWT_EXPIRES_IN', env('PROD_JWT_EXPIRES_IN', '1h'))!,
+        refreshExpiresIn: env('JWT_REFRESH_EXPIRES_IN', env('PROD_JWT_REFRESH_EXPIRES_IN', '7d'))!
       },
       bcrypt: {
         saltRounds: 12
@@ -370,12 +374,15 @@ export function getEnvironmentConfig(): EnvironmentConfig {
 export function validateEnvironmentVariables(): { isValid: boolean; missing: string[] } {
   const config = getEnvironmentConfig();
   const missing: string[] = [];
+  const hasDatabaseUrl = Boolean(env('DATABASE_URL') || env('PROD_DATABASE_URL') || env('STAGING_DATABASE_URL'));
 
   // Validar variables de base de datos
-  if (!config.database.host) missing.push('DB_HOST');
-  if (!config.database.database) missing.push('DB_NAME');
-  if (!config.database.username) missing.push('DB_USERNAME');
-  if (!config.database.password) missing.push('DB_PASSWORD');
+  if (!hasDatabaseUrl) {
+    if (!config.database.host) missing.push('DATABASE_URL o DB_HOST/PROD_DB_HOST');
+    if (!config.database.database) missing.push('DATABASE_URL o DB_NAME/PROD_DB_NAME');
+    if (!config.database.username) missing.push('DATABASE_URL o DB_USERNAME/DB_USER/PROD_DB_USER');
+    if (!config.database.password) missing.push('DATABASE_URL o DB_PASSWORD/PROD_DB_PASSWORD');
+  }
 
   // Validar variables de seguridad
   if (!config.security.jwt.secret) missing.push('JWT_SECRET');

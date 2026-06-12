@@ -1,12 +1,12 @@
 // Constantes de configuración del servidor
 export const SERVER_CONFIG = {
-  PORT: process.env.PORT || 3001,
-  NODE_ENV: process.env.NODE_ENV || 'development',
+  PORT: parseInt(env('PORT', '3001')!, 10),
+  NODE_ENV: env('NODE_ENV', 'development'),
   API_VERSION: 'v1',
   BASE_PATH: `/api/v1`,
-  CORS_ORIGIN: process.env.CORS_ORIGIN || 'http://localhost:3000',
-  JWT_SECRET: process.env.JWT_SECRET || 'cattle-tracking-secret-key',
-  JWT_EXPIRES_IN: '24h',
+  CORS_ORIGIN: env('CORS_ORIGIN', env('FRONTEND_URL', 'http://localhost:3000'))!,
+  JWT_SECRET: productionSecret('JWT_SECRET', ['JWT_ACCESS_SECRET', 'PROD_JWT_SECRET']),
+  JWT_EXPIRES_IN: env('JWT_EXPIRES_IN', '24h')!,
   BCRYPT_ROUNDS: 12,
 } as const;
 
@@ -385,3 +385,4 @@ export type UserStatus = typeof USER_STATUS[keyof typeof USER_STATUS];
 export type NotificationType = typeof NOTIFICATION_TYPES[keyof typeof NOTIFICATION_TYPES];
 export type ReportType = typeof REPORT_TYPES[keyof typeof REPORT_TYPES];
 export type LogLevel = typeof LOG_LEVELS[keyof typeof LOG_LEVELS];
+import { env, productionSecret } from '../config/env';

@@ -1,4 +1,5 @@
 // config/redis.ts
+import { env, getRedisUrl as getConfiguredRedisUrl } from './env';
 
 /**
  * Configuración de Redis para el sistema de colas
@@ -8,6 +9,7 @@
 interface RedisConfig {
     host: string;
     port: number;
+    username?: string;
     password?: string;
     db?: number;
     keyPrefix?: string;
@@ -15,13 +17,29 @@ interface RedisConfig {
     retryStrategy?: (times: number) => number | false;
 }
 
+function parseRedisUrl(url?: string): Partial<RedisConfig> {
+    if (!url) return {};
+    const parsed = new URL(url);
+    return {
+        host: parsed.hostname,
+        port: parseInt(parsed.port || '6379'),
+        username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
+        password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
+        db: parsed.pathname && parsed.pathname !== '/' ? parseInt(parsed.pathname.slice(1)) : undefined,
+        tls: parsed.protocol === 'rediss:',
+    };
+}
+
+const redisUrlConfig = parseRedisUrl(getConfiguredRedisUrl());
+
 // Configuración base
 const baseConfig: RedisConfig = {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379'),
-    password: process.env.REDIS_PASSWORD,
-    db: parseInt(process.env.REDIS_DB || '0'),
-    keyPrefix: process.env.REDIS_PREFIX || 'ganadero:',
+    host: env('REDIS_HOST', 'localhost')!,
+    port: parseInt(env('REDIS_PORT', '6379')!),
+    username: env('REDIS_USERNAME'),
+    password: env('REDIS_PASSWORD'),
+    db: parseInt(env('REDIS_DB', '0')!),
+    keyPrefix: env('REDIS_PREFIX', 'ganadero:')!,
     retryStrategy: (times: number) => {
         // Estrategia de reintento: esperar más cada vez
         if (times > 10) {
@@ -49,16 +67,19 @@ const envConfigs: Record<string, Partial<RedisConfig>> = {
     },
     staging: {
         // En staging, podría tener password
-        host: process.env.REDIS_HOST || 'redis-staging.ganadero-ujat.com',
-        port: parseInt(process.env.REDIS_PORT || '6379'),
-        password: process.env.REDIS_PASSWORD,
+        host: env('REDIS_HOST', 'redis-staging.ganadero-ujat.com')!,
+        port: parseInt(env('REDIS_PORT', '6379')!),
+        username: env('REDIS_USERNAME'),
+        password: env('REDIS_PASSWORD'),
         tls: true, // Staging usualmente requiere TLS
     },
     production: {
         // En producción, configuración robusta
-        host: process.env.REDIS_HOST!,
-        port: parseInt(process.env.REDIS_PORT || '6379'),
-        password: process.env.REDIS_PASSWORD,
+        host: env('REDIS_HOST', redisUrlConfig.host)!,
+        port: parseInt(env('REDIS_PORT', redisUrlConfig.port?.toString() || '6379')!),
+        username: env('REDIS_USERNAME', redisUrlConfig.username),
+        password: env('REDIS_PASSWORD', redisUrlConfig.password),
+        db: parseInt(env('REDIS_DB', redisUrlConfig.db?.toString() || '0')!),
         tls: true, // Siempre TLS en producción
         retryStrategy: (times: number) => {
             // En producción, reintentar más veces
@@ -77,12 +98,13 @@ const environment = process.env.NODE_ENV || 'development';
 // Combinar configuraciones
 const redisConfig: RedisConfig = {
     ...baseConfig,
-    ...(envConfigs[environment] || envConfigs.development)
+    ...(envConfigs[environment] || envConfigs.development),
+    ...redisUrlConfig,
 };
 
 // Validar configuración requerida en producción
 if (environment === 'production' && !redisConfig.host) {
-    throw new Error('REDIS_HOST es requerido en producción');
+    throw new Error('REDIS_URL o REDIS_HOST es requerido en producción');
 }
 
 // Exportar configuración

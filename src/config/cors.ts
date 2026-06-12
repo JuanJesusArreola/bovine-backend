@@ -2,6 +2,8 @@
 // CORS.TS - CONFIGURACIÓN CORS ARREGLADA
 // ============================================================================
 
+import { env } from './env';
+
 let cors: any;
 
 try {
@@ -20,6 +22,7 @@ const corsOptions = {
     }
     
     // Orígenes permitidos
+    const configuredOrigins = env('ALLOWED_ORIGINS') || env('PROD_CORS_ORIGINS') || env('FRONTEND_URL') || '';
     const allowedOrigins = [
       'http://localhost:3000',
       'http://localhost:5173',
@@ -27,14 +30,14 @@ const corsOptions = {
       'http://localhost:8080',
       'http://127.0.0.1:3000',
       'http://localhost:4173',
-      process.env.FRONTEND_URL
-    ].filter(Boolean);
+      ...configuredOrigins.split(','),
+    ].map((item) => item.trim()).filter(Boolean);
 
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       console.log('🚫 Origen bloqueado:', origin);
-      callback(null, true); // PERMITIR DE TODAS FORMAS EN DESARROLLO
+      callback(new Error(`Origen no permitido por CORS: ${origin}`), false);
     }
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
