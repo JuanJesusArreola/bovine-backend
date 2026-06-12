@@ -407,10 +407,21 @@ async function initializeServices(): Promise<boolean> {
     await initializeDatabase();
     console.log('✅ Base de datos inicializada correctamente');
 
-    // Poblar catálogo de enfermedades (idempotente — usa findOrCreate)
-    console.log('🦠 Ejecutando seeders de enfermedades...');
-    await runDiseaseSeeds();
-    console.log('✅ Catálogo de enfermedades listo');
+    // Poblar catálogo de enfermedades en segundo plano.
+    // Render requiere que el servicio abra el puerto pronto; los seeders son
+    // idempotentes y no deben bloquear el arranque del servidor.
+    if (process.env.RUN_DISEASE_SEEDERS !== 'false') {
+      console.log('🦠 Ejecutando seeders de enfermedades en segundo plano...');
+      void runDiseaseSeeds()
+        .then(() => {
+          console.log('✅ Catálogo de enfermedades listo');
+        })
+        .catch((seedErr) => {
+          console.error('❌ Seeders de enfermedades fallaron:', seedErr);
+        });
+    } else {
+      console.log('⏭️ Seeders de enfermedades omitidos por RUN_DISEASE_SEEDERS=false');
+    }
 
     // Backfill del estado de vacunación (V-01) — solo bovinos SIN fila de estado.
     // Best-effort: si falla, no bloquea el arranque (el job diario lo corrige).
