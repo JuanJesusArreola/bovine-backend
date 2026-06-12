@@ -1249,7 +1249,12 @@ export class BovineTrackingService {
                 type: 'SELECT'
             });
 
-            const results = [];
+            const results: Array<{
+                bovineId: string;
+                earTag: string;
+                distance: number;
+                location: { lat: number; lng: number };
+            }> = [];
             for (const point of latestTrackings as any[]) {
                 const distance = haversineDistance(
                     center.lat, center.lng,

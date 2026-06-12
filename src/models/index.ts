@@ -1525,7 +1525,7 @@ class Database {
 
       // Índice para usuarios por email y rol
       if (tables.includes('users')) {
-        const userColumns = [];
+        const userColumns: string[] = [];
 
         // Verificar cada columna antes de agregarla al índice
         if (await this.columnExists('users', 'email')) userColumns.push('email');
@@ -1547,7 +1547,7 @@ class Database {
 
       // Índices para bovinos si la tabla existe
       if (tables.includes('bovines')) {
-        const bovineColumns = [];
+        const bovineColumns: string[] = [];
 
         if (await this.columnExists('bovines', 'ear_tag')) bovineColumns.push('ear_tag');
         if (await this.columnExists('bovines', 'breed')) bovineColumns.push('breed');
@@ -1567,7 +1567,7 @@ class Database {
 
       // Índices para eventos si la tabla existe
       if (tables.includes('events')) {
-        const eventColumns = [];
+        const eventColumns: string[] = [];
 
         if (await this.columnExists('events', 'event_type')) eventColumns.push('event_type');
         if (await this.columnExists('events', 'scheduled_date')) eventColumns.push('scheduled_date');
@@ -1587,7 +1587,7 @@ class Database {
 
       // Índices para finanzas si la tabla existe
       if (tables.includes('finances')) {
-        const financeColumns = [];
+        const financeColumns: string[] = [];
 
         if (await this.columnExists('finances', 'transaction_date')) financeColumns.push('transaction_date');
         if (await this.columnExists('finances', 'transaction_type')) financeColumns.push('transaction_type');

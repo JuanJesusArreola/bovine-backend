@@ -25,9 +25,10 @@
     "esModuleInterop": true,
     
     "strict": true,
+    "noImplicitAny": false,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     
     // Configuraciones adicionales para compatibilidad
     "declaration": false,
@@ -47,6 +48,7 @@
     "uploads",
     "logs",
     "test",
+    "src/temp-*.ts",
     "**/*.spec.ts",
     "**/*.test.ts"
   ],

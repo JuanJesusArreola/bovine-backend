@@ -69,7 +69,7 @@ export class ReproductionService {
     if (filters?.reproductionType) where.reproductionType = filters.reproductionType;
     // Construir condiciones de fecha usando serviceInfo->>'serviceDate'
     if (filters?.startDate || filters?.endDate) {
-      const dateConditions = [];
+      const dateConditions: any[] = [];
       if (filters.startDate) {
         dateConditions.push(
           sequelize.literal(`("serviceInfo"->>'serviceDate')::timestamp >= '${filters.startDate.toISOString()}'`)
@@ -104,7 +104,7 @@ export class ReproductionService {
     if (filters?.reproductionType) where.reproductionType = filters.reproductionType;
     // Condiciones de fecha
     if (filters?.startDate || filters?.endDate) {
-      const dateConditions = [];
+      const dateConditions: any[] = [];
       if (filters.startDate) {
         dateConditions.push(
           sequelize.literal(`("serviceInfo"->>'serviceDate')::timestamp >= '${filters.startDate.toISOString()}'`)
