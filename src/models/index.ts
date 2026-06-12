@@ -1865,12 +1865,11 @@ class Database {
       // Verificar transacciones sin aprobar antiguas
       try {
         const oldPendingTransactions = await Finance.count({
-          where: {
-            // Usar propiedades que existan en el modelo Finance
-            createdAt: {
-              [Op.lt]: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // 30 días atrás
-            }
-          }
+          where: sequelizeInstance.where(
+            sequelizeInstance.col('Finance.created_at'),
+            Op.lt,
+            new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // 30 días atrás
+          )
         });
 
         if (oldPendingTransactions > 0) {

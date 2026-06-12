@@ -38,6 +38,7 @@ export class EmailQueueService extends EventEmitter {
         super();
 
         this.sendEmailCallback = sendEmailCallback;
+        logger.info('EmailQueueService inicializando con Redis', this.context, this.getSafeRedisMetadata(redisConfig));
         // Inicializar cola con configuración de Redis
         this.queue = new Bull<EmailJobData>(queueNames.email, {
             redis: redisConfig,
@@ -55,13 +56,18 @@ export class EmailQueueService extends EventEmitter {
     private setupEventHandlers(): void {
         this.queue.on('error', (error) => {
             this.isAvailable = false;
-            logger.error('Error en cola de emails', this.context, {}, error);
+            logger.error(
+                'EmailQueueService no disponible; emails inmediatos seguiran por SMTP y emails programados quedan deshabilitados',
+                this.context,
+                this.getSafeRedisMetadata(redisConfig),
+                error
+            );
             this.emit('queueError', error);
         });
 
         this.queue.on('ready', () => {
             this.isAvailable = true;
-            logger.info('Cola de emails conectada a Redis', this.context);
+            logger.info('Cola de emails conectada a Redis', this.context, this.getSafeRedisMetadata(redisConfig));
         });
 
         this.queue.on('failed', (job, error) => {
@@ -89,6 +95,18 @@ export class EmailQueueService extends EventEmitter {
         this.queue.on('waiting', (jobId) => {
             this.emit('jobWaiting', jobId);
         });
+    }
+
+    private getSafeRedisMetadata(config: any): Record<string, unknown> {
+        return {
+            host: config?.host,
+            port: config?.port,
+            db: config?.db,
+            username: config?.username,
+            tls: Boolean(config?.tls),
+            keyPrefix: config?.keyPrefix,
+            hasPassword: Boolean(config?.password)
+        };
     }
 
     /**
