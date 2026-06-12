@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { UserRole } from '../models/User';
 import { createClient, RedisClientType } from 'redis';
 import { logMessage, LogLevel } from './logging';
-import { env, getRedisUrl } from '../config/env';
+import { env, getRedisUrl, parseBooleanEnv } from '../config/env';
 
 // Interface para configuración de límites
 interface RateLimitConfig {
@@ -146,6 +146,7 @@ const IP_RATE_LIMITS = {
   maxRequests: 100            // 100 requests por IP
 };
 const REDIS_URL = getRedisUrl();
+const REDIS_TLS = parseBooleanEnv('REDIS_TLS', REDIS_URL?.startsWith('rediss://') || false);
 
 // ============================================================================
 // STORE EN MEMORIA — FALLBACK CUANDO REDIS NO ESTÁ DISPONIBLE
@@ -212,6 +213,7 @@ class RedisRateLimitStore {
         socket: {
           host: env('REDIS_HOST', 'localhost')!,
           port: parseInt(env('REDIS_PORT', '6379')!),
+          ...(REDIS_URL ? {} : REDIS_TLS ? { tls: true } : {}),
 
           /**
            * reconnectStrategy: función que decide cuánto esperar

@@ -1,5 +1,5 @@
 // config/redis.ts
-import { env, getRedisUrl as getConfiguredRedisUrl } from './env';
+import { env, getRedisUrl as getConfiguredRedisUrl, parseBooleanEnv } from './env';
 
 /**
  * Configuración de Redis para el sistema de colas
@@ -71,7 +71,7 @@ const envConfigs: Record<string, Partial<RedisConfig>> = {
         port: parseInt(env('REDIS_PORT', '6379')!),
         username: env('REDIS_USERNAME'),
         password: env('REDIS_PASSWORD'),
-        tls: true, // Staging usualmente requiere TLS
+        tls: parseBooleanEnv('REDIS_TLS', redisUrlConfig.tls || false),
     },
     production: {
         // En producción, configuración robusta
@@ -80,7 +80,7 @@ const envConfigs: Record<string, Partial<RedisConfig>> = {
         username: env('REDIS_USERNAME', redisUrlConfig.username),
         password: env('REDIS_PASSWORD', redisUrlConfig.password),
         db: parseInt(env('REDIS_DB', redisUrlConfig.db?.toString() || '0')!),
-        tls: true, // Siempre TLS en producción
+        tls: parseBooleanEnv('REDIS_TLS', redisUrlConfig.tls || false),
         retryStrategy: (times: number) => {
             // En producción, reintentar más veces
             if (times > 20) {
