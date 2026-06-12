@@ -34,6 +34,7 @@ dotenv.config();
 
 // Crear aplicación Express
 const app: Application = express();
+app.set('trust proxy', 1);
 
 // Crear servidor HTTP
 const server = createServer(app);
