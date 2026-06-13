@@ -244,16 +244,7 @@ if (process.env.NODE_ENV !== 'test') {
 app.use(express.json({
   limit: '10mb',
   verify: (req, res, buf) => {
-    try {
-      JSON.parse(buf.toString());
-    } catch (e) {
-      const response = res as Response;
-      response.status(400).json({
-        success: false,
-        message: 'JSON inválido en el cuerpo de la petición'
-      });
-      throw new Error('JSON inválido');
-    }
+    (req as any).rawBody = buf.toString('utf8');
   }
 }));
 
@@ -261,6 +252,18 @@ app.use(express.urlencoded({
   extended: true,
   limit: '10mb'
 }));
+
+app.use((error: any, req: Request, res: Response, next: NextFunction) => {
+  if (error instanceof SyntaxError && 'body' in error) {
+    res.status(400).json({
+      success: false,
+      message: 'JSON inválido en el cuerpo de la petición'
+    });
+    return;
+  }
+
+  next(error);
+});
 
 // ============================================================================
 // RUTAS PRINCIPALES

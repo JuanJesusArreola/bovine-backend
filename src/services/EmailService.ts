@@ -162,6 +162,8 @@ export class EmailService extends EventEmitter {
     private config!: EmailConfig;
     private queueService: EmailQueueService;
     private isInitialized = false;
+    private initializationPromise: Promise<void>;
+    private initializationError?: Error;
     private quota: Map<string, { count: number; resetAt: Date }> = new Map();
 
     constructor() {
@@ -174,8 +176,9 @@ export class EmailService extends EventEmitter {
                 await this.sendEmailImmediately(options);
             }
         );
-        void this.initialize().catch((error) => {
+        this.initializationPromise = this.initialize().catch((error) => {
             this.isInitialized = false;
+            this.initializationError = error as Error;
             logger.error('EmailService no pudo inicializarse; el backend continuará sin email', this.context, {}, error as Error);
         });
     }
@@ -210,6 +213,20 @@ export class EmailService extends EventEmitter {
         }
     }
 
+    private async ensureInitialized(): Promise<void> {
+        if (!this.isInitialized) {
+            await this.initializationPromise;
+        }
+
+        if (this.initializationError) {
+            throw new EmailError('INITIALIZATION_FAILED', 'EmailService no está disponible', 500, this.initializationError);
+        }
+
+        if (!this.isInitialized || !this.transporter) {
+            throw new EmailError('NOT_INITIALIZED', 'EmailService aún no está inicializado');
+        }
+    }
+
     /**
      * Carga configuración desde variables de entorno
      */
@@ -238,6 +255,9 @@ export class EmailService extends EventEmitter {
                 host: this.config.host,
                 port: this.config.port,
                 secure: this.config.secure,
+                connectionTimeout: parseInt(process.env.SMTP_CONNECTION_TIMEOUT || '10000'),
+                greetingTimeout: parseInt(process.env.SMTP_GREETING_TIMEOUT || '10000'),
+                socketTimeout: parseInt(process.env.SMTP_SOCKET_TIMEOUT || '15000'),
                 auth: {
                     user: this.config.user,
                     pass: this.config.password
@@ -255,6 +275,17 @@ export class EmailService extends EventEmitter {
             }
 
             this.transporter = nodemailer.createTransport(transportOptions);
+            logger.info('SMTP transporter creado', this.context, {
+                host: this.config.host,
+                port: this.config.port,
+                secure: this.config.secure,
+                user: this.config.user,
+                fromEmail: this.config.fromEmail,
+                hasPassword: Boolean(this.config.password),
+                connectionTimeout: transportOptions.connectionTimeout,
+                greetingTimeout: transportOptions.greetingTimeout,
+                socketTimeout: transportOptions.socketTimeout
+            });
 
             // Prueba de conexión SMTP en segundo plano
             this.transporter.verify((error, success) => {
@@ -366,6 +397,21 @@ export class EmailService extends EventEmitter {
         userId?: string
     ): Promise<SendResult> {
         try {
+            const sendStart = Date.now();
+            logger.info('EmailService: preparando envío', this.context, {
+                to: options.to,
+                template: options.template,
+                priority: options.priority,
+                scheduled: Boolean(options.scheduledAt)
+            });
+
+            await this.ensureInitialized();
+            logger.info('EmailService: inicialización lista para envío', this.context, {
+                to: options.to,
+                template: options.template,
+                elapsedMs: Date.now() - sendStart
+            });
+
             // Validaciones
             this.validateRecipients(options.to);
             await this.checkQuota(userId);
@@ -453,13 +499,24 @@ export class EmailService extends EventEmitter {
             }
 
             // Envío inmediato
+            logger.info('EmailService: enviando por SMTP', this.context, {
+                emailId,
+                to: options.to,
+                template: options.template,
+                host: this.config.host,
+                port: this.config.port,
+                secure: this.config.secure,
+                fromEmail: this.config.fromEmail,
+                elapsedMs: Date.now() - sendStart
+            });
             const result = await this.transporter.sendMail(mailOptions);
 
             logger.info('Email enviado', this.context, {
                 emailId,
                 to: options.to,
                 template: options.template,
-                messageId: result.messageId
+                messageId: result.messageId,
+                elapsedMs: Date.now() - sendStart
             });
 
             return {
@@ -471,7 +528,12 @@ export class EmailService extends EventEmitter {
         } catch (error) {
             logger.error('Error enviando email', this.context, {
                 to: options.to,
-                template: options.template
+                template: options.template,
+                errorName: (error as Error).name,
+                errorMessage: (error as Error).message,
+                errorCode: (error as any).code,
+                smtpResponse: (error as any).response,
+                smtpCommand: (error as any).command
             }, error as Error);
 
             if (error instanceof EmailError) throw error;
@@ -487,6 +549,8 @@ export class EmailService extends EventEmitter {
         options: EmailOptions<T>
     ): Promise<void> {
         try {
+            await this.ensureInitialized();
+
             // Compilar plantilla
             const compiled = emailTemplateService.compile(options.template, options.variables);
 

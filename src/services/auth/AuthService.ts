@@ -92,10 +92,16 @@ export class AuthService {
         const startTime = Date.now();
 
         try {
+            logger.info('Register: iniciando flujo', this.context, {
+                email: data.email,
+                ipAddress: data.ipAddress
+            });
+
             // Validar contraseñas
             if (data.password !== data.confirmPassword) {
                 throw new ValidationError('Las contraseñas no coinciden');
             }
+            logger.info('Register: contraseñas validadas', this.context, { email: data.email });
 
             // Verificar si el usuario ya existe
             const existingUser = await User.findOne({
@@ -107,6 +113,7 @@ export class AuthService {
             if (existingUser) {
                 throw new ValidationError('El usuario ya existe con este email');
             }
+            logger.info('Register: email disponible', this.context, { email: data.email });
 
             // SEGURIDAD: el registro público SIEMPRE crea con el rol mínimo (VIEWER),
             // ignorando cualquier `role` recibido. La elevación de rol solo ocurre
@@ -124,12 +131,46 @@ export class AuthService {
                 ipAddress: data.ipAddress,
                 userAgent: data.userAgent
             });
+            logger.info('Register: usuario creado en BD', this.context, {
+                email: user.email,
+                userId: user.id,
+                elapsedMs: Date.now() - startTime
+            });
 
             // Generar tokens
             const tokens = tokenService.generateTokens(user, false);
+            logger.info('Register: tokens generados', this.context, {
+                email: user.email,
+                userId: user.id,
+                elapsedMs: Date.now() - startTime
+            });
+
+            let emailVerificationSent = false;
 
             // Enviar email de verificación
-            await this.sendEmailVerification(user.id, user.email, data.ipAddress, data.userAgent);
+            logger.info('Register: enviando email de verificación', this.context, {
+                email: user.email,
+                userId: user.id,
+                elapsedMs: Date.now() - startTime
+            });
+            try {
+                await this.sendEmailVerification(user.id, user.email, data.ipAddress, data.userAgent);
+                emailVerificationSent = true;
+                logger.info('Register: email de verificación enviado', this.context, {
+                    email: user.email,
+                    userId: user.id,
+                    elapsedMs: Date.now() - startTime
+                });
+            } catch (emailError) {
+                logger.error('Register: usuario creado pero falló el email de verificación', this.context, {
+                    email: user.email,
+                    userId: user.id,
+                    elapsedMs: Date.now() - startTime,
+                    errorName: (emailError as Error).name,
+                    errorMessage: (emailError as Error).message,
+                    errorCode: (emailError as any).code
+                }, emailError as Error);
+            }
 
             // Registrar evento de seguridad
             await securityEventService.logEvent({
@@ -150,7 +191,10 @@ export class AuthService {
             });
 
             return {
-                user: await this.formatUserResponse(user),
+                user: {
+                    ...await this.formatUserResponse(user),
+                    emailVerificationSent
+                } as any,
                 token: tokens.accessToken,
                 refreshToken: tokens.refreshToken,
                 expiresIn: tokens.expiresIn

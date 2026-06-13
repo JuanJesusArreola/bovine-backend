@@ -349,13 +349,11 @@ export class UserService {
                 username = `${baseUsername}${counter}`;
             }
 
-            // Verificar si el usuario ya existe
+            // Verificar si el email ya existe. El username se genera arriba con
+            // contador para evitar colisiones por nombres repetidos.
             const existingUser = await User.findOne({
                 where: {
-                    [Op.or]: [
-                        { email: data.email.toLowerCase() },
-                        { username: this.generateUsername(data.firstName, data.lastName) }
-                    ]
+                    email: data.email.toLowerCase()
                 },
                 transaction: t
             });
@@ -506,7 +504,14 @@ export class UserService {
                 });
             }
 
-            logger.error('Error creando usuario', this.context, { data }, error as Error);
+            logger.error('Error creando usuario', this.context, {
+                email: data.email,
+                firstName: data.firstName,
+                lastName: data.lastName,
+                phone: data.phone,
+                role: data.role,
+                createdBy: data.createdBy
+            }, error as Error);
             throw error;
         }
     }

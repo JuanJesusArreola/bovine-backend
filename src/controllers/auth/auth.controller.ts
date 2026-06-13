@@ -53,7 +53,14 @@ export class AuthController {
             });
 
         } catch (error) {
-            logger.error('Error en register', this.context, { body: req.body }, error as Error);
+            logger.error('Error en register', this.context, {
+                email: req.body?.email,
+                firstName: req.body?.firstName,
+                lastName: req.body?.lastName,
+                phone: req.body?.phone,
+                errorName: (error as Error).name,
+                errorMessage: (error as Error).message
+            }, error as Error);
 
             if (error instanceof ValidationError) {
                 res.status(400).json({
