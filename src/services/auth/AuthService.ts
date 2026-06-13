@@ -50,6 +50,8 @@ export interface AuthResponse {
         permissions: any;
         lastLogin?: Date;
         isActive: boolean;
+        emailVerificationQueued?: boolean;
+        emailVerificationSent?: boolean;
     };
     token: string;
     refreshToken: string;
@@ -147,16 +149,34 @@ export class AuthService {
 
             let emailVerificationSent = false;
 
-            // Enviar email de verificación
-            logger.info('Register: enviando email de verificación', this.context, {
+            // Enviar email de verificacion en segundo plano. El registro no debe
+            // bloquearse por SMTP, porque puede tardar y provocar timeouts en el frontend.
+            logger.info('Register: programando email de verificacion en segundo plano', this.context, {
                 email: user.email,
                 userId: user.id,
                 elapsedMs: Date.now() - startTime
             });
             try {
-                await this.sendEmailVerification(user.id, user.email, data.ipAddress, data.userAgent);
-                emailVerificationSent = true;
-                logger.info('Register: email de verificación enviado', this.context, {
+                void this.sendEmailVerification(user.id, user.email, data.ipAddress, data.userAgent)
+                    .then(() => {
+                        logger.info('Register: email de verificacion enviado en segundo plano', this.context, {
+                            email: user.email,
+                            userId: user.id,
+                            elapsedMs: Date.now() - startTime
+                        });
+                    })
+                    .catch((emailError) => {
+                        logger.error('Register: usuario creado pero fallo el email de verificacion en segundo plano', this.context, {
+                            email: user.email,
+                            userId: user.id,
+                            elapsedMs: Date.now() - startTime,
+                            errorName: (emailError as Error).name,
+                            errorMessage: (emailError as Error).message,
+                            errorCode: (emailError as any).code
+                        }, emailError as Error);
+                    });
+                emailVerificationSent = false;
+                logger.info('Register: email de verificacion programado en segundo plano', this.context, {
                     email: user.email,
                     userId: user.id,
                     elapsedMs: Date.now() - startTime
@@ -187,14 +207,16 @@ export class AuthService {
 
             logger.info(`Usuario registrado exitosamente: ${user.email}`, this.context, {
                 userId: user.id,
-                durationMs: duration
+                durationMs: duration,
+                emailVerificationQueued: true
             });
 
             return {
                 user: {
                     ...await this.formatUserResponse(user),
+                    emailVerificationQueued: true,
                     emailVerificationSent
-                } as any,
+                },
                 token: tokens.accessToken,
                 refreshToken: tokens.refreshToken,
                 expiresIn: tokens.expiresIn
