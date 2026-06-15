@@ -1,7 +1,9 @@
 // services/email/EmailService.ts
 import nodemailer from 'nodemailer';
+import sgMail from '@sendgrid/mail';
 import { v4 as uuidv4 } from 'uuid';
 import { EventEmitter } from 'events';
+import fs from 'fs';
 import logger from '../utils/logger';
 import {
     EmailError,
@@ -45,6 +47,7 @@ export enum EmailPriority {
 // ============================================================================
 
 export interface EmailConfig {
+    provider: string;
     host: string;
     port: number;
     secure: boolean;
@@ -222,7 +225,7 @@ export class EmailService extends EventEmitter {
             throw new EmailError('INITIALIZATION_FAILED', 'EmailService no está disponible', 500, this.initializationError);
         }
 
-        if (!this.isInitialized || !this.transporter) {
+        if (!this.isInitialized || (this.config.provider !== 'sendgrid_api' && !this.transporter)) {
             throw new EmailError('NOT_INITIALIZED', 'EmailService aún no está inicializado');
         }
     }
@@ -231,18 +234,45 @@ export class EmailService extends EventEmitter {
      * Carga configuración desde variables de entorno
      */
     private loadConfig(): void {
+        const requestedProvider = process.env.EMAIL_PROVIDER?.toLowerCase();
+        const provider = requestedProvider || (
+            process.env.NODE_ENV === 'production' && process.env.SENDGRID_API_KEY
+                ? 'sendgrid_api'
+                : 'smtp'
+        );
+        const isSendGridSmtp = provider === 'sendgrid' || provider === 'sendgrid_smtp';
+        const isSendGridApi = provider === 'sendgrid_api';
+        const defaultHost = isSendGridSmtp ? 'smtp.sendgrid.net' : 'smtp.gmail.com';
+        const host = isSendGridSmtp
+            ? (process.env.SENDGRID_SMTP_HOST || defaultHost)
+            : (process.env.SMTP_HOST || defaultHost);
+        const port = isSendGridSmtp
+            ? parseInt(process.env.SENDGRID_SMTP_PORT || process.env.SMTP_PORT || '587')
+            : parseInt(process.env.SMTP_PORT || '587');
+
         this.config = {
-            host: process.env.SMTP_HOST || 'smtp.gmail.com',
-            port: parseInt(process.env.SMTP_PORT || '587'),
+            provider,
+            host,
+            port,
             secure: process.env.SMTP_SECURE === 'true',
-            user: process.env.SMTP_USER || '',
-            password: process.env.SMTP_PASSWORD || '',
+            user: isSendGridSmtp ? 'apikey' : (process.env.SMTP_USER || ''),
+            password: (isSendGridSmtp || isSendGridApi)
+                ? (process.env.SENDGRID_API_KEY || process.env.SMTP_PASSWORD || '')
+                : (process.env.SMTP_PASSWORD || ''),
             fromName: process.env.FROM_NAME || 'Sistema Ganadero UJAT',
-            fromEmail: process.env.FROM_EMAIL || 'noreply@ganadero-ujat.com',
+            fromEmail: process.env.SENDGRID_FROM_EMAIL || process.env.FROM_EMAIL || 'noreply@ganadero-ujat.com',
             pool: true,
             maxConnections: 5,
             rateLimit: parseInt(process.env.SMTP_RATE_LIMIT || '10') // emails por segundo
         };
+
+        if ((isSendGridSmtp || isSendGridApi) && !this.config.password) {
+            logger.warn('SendGrid configurado sin SENDGRID_API_KEY', this.context, {
+                provider: this.config.provider,
+                host: this.config.host,
+                fromEmail: this.config.fromEmail
+            });
+        }
     }
 
     /**
@@ -250,6 +280,16 @@ export class EmailService extends EventEmitter {
      */
     private async initializeTransporter(): Promise<void> {
         try {
+            if (this.config.provider === 'sendgrid_api') {
+                sgMail.setApiKey(this.config.password);
+                logger.info('SendGrid API client configurado', this.context, {
+                    provider: this.config.provider,
+                    fromEmail: this.config.fromEmail,
+                    hasApiKey: Boolean(this.config.password)
+                });
+                return;
+            }
+
             // Construir opciones de transporte
             const transportOptions: any = {
                 host: this.config.host,
@@ -276,6 +316,7 @@ export class EmailService extends EventEmitter {
 
             this.transporter = nodemailer.createTransport(transportOptions);
             logger.info('SMTP transporter creado', this.context, {
+                provider: this.config.provider,
                 host: this.config.host,
                 port: this.config.port,
                 secure: this.config.secure,
@@ -297,6 +338,7 @@ export class EmailService extends EventEmitter {
                     });
                 } else {
                     logger.info('Conexión SMTP verificada correctamente', 'EmailService', {
+                        provider: this.config.provider,
                         host: this.config.host,
                         port: this.config.port,
                         secure: this.config.secure,
@@ -498,18 +540,13 @@ export class EmailService extends EventEmitter {
                 };
             }
 
-            // Envío inmediato
-            logger.info('EmailService: enviando por SMTP', this.context, {
+            const result = await this.deliverEmail(
+                mailOptions,
+                options.attachments,
                 emailId,
-                to: options.to,
-                template: options.template,
-                host: this.config.host,
-                port: this.config.port,
-                secure: this.config.secure,
-                fromEmail: this.config.fromEmail,
-                elapsedMs: Date.now() - sendStart
-            });
-            const result = await this.transporter.sendMail(mailOptions);
+                options.template,
+                sendStart
+            );
 
             logger.info('Email enviado', this.context, {
                 emailId,
@@ -549,6 +586,8 @@ export class EmailService extends EventEmitter {
         options: EmailOptions<T>
     ): Promise<void> {
         try {
+            const sendStart = Date.now();
+            const emailId = uuidv4();
             await this.ensureInitialized();
 
             // Compilar plantilla
@@ -572,18 +611,30 @@ export class EmailService extends EventEmitter {
                 }
             };
 
-            // Enviar
-            await this.transporter.sendMail(mailOptions);
+            await this.deliverEmail(
+                mailOptions,
+                options.attachments,
+                emailId,
+                options.template,
+                sendStart
+            );
 
             logger.debug('Email enviado inmediatamente', this.context, {
                 to: options.to,
-                template: options.template
+                template: options.template,
+                provider: this.config.provider
             });
 
         } catch (error) {
             logger.error('Error en envío inmediato', this.context, {
                 to: options.to,
-                template: options.template
+                template: options.template,
+                provider: this.config.provider,
+                errorName: (error as Error).name,
+                errorMessage: (error as Error).message,
+                errorCode: (error as any).code,
+                smtpResponse: (error as any).response,
+                smtpCommand: (error as any).command
             }, error as Error);
             throw error; // Importante: relanzar para que Bull reintente
         }
@@ -720,6 +771,66 @@ export class EmailService extends EventEmitter {
         };
     }
 
+    private async deliverEmail(
+        mailOptions: nodemailer.SendMailOptions,
+        attachments: EmailAttachment[] | undefined,
+        emailId: string,
+        template: EmailType,
+        sendStart: number
+    ): Promise<{ messageId?: string }> {
+        if (this.config.provider === 'sendgrid_api') {
+            logger.info('EmailService: enviando por SendGrid API', this.context, {
+                emailId,
+                to: mailOptions.to,
+                template,
+                provider: this.config.provider,
+                fromEmail: this.config.fromEmail,
+                elapsedMs: Date.now() - sendStart
+            });
+
+            const msg: any = {
+                to: mailOptions.to as any,
+                from: {
+                    email: this.config.fromEmail,
+                    name: this.config.fromName
+                },
+                subject: String(mailOptions.subject || ''),
+                html: typeof mailOptions.html === 'string' ? mailOptions.html : undefined,
+                text: typeof mailOptions.text === 'string' ? mailOptions.text : undefined,
+                cc: mailOptions.cc as any,
+                bcc: mailOptions.bcc as any,
+                replyTo: mailOptions.replyTo as any,
+                headers: mailOptions.headers as Record<string, string> | undefined,
+                attachments: this.prepareSendGridAttachments(attachments) as any
+            };
+
+            const [response] = await sgMail.send(msg, false);
+            const messageId = response.headers?.['x-message-id'] || response.headers?.['X-Message-Id'];
+
+            return {
+                messageId: Array.isArray(messageId) ? messageId[0] : messageId
+            };
+        }
+
+        logger.info('EmailService: enviando por SMTP', this.context, {
+            emailId,
+            to: mailOptions.to,
+            template,
+            provider: this.config.provider,
+            host: this.config.host,
+            port: this.config.port,
+            secure: this.config.secure,
+            fromEmail: this.config.fromEmail,
+            elapsedMs: Date.now() - sendStart
+        });
+
+        const result = await this.transporter.sendMail(mailOptions);
+
+        return {
+            messageId: result.messageId
+        };
+    }
+
     /**
      * Prepara attachments para Nodemailer
      */
@@ -733,6 +844,34 @@ export class EmailService extends EventEmitter {
             contentType: att.contentType,
             cid: att.cid
         }));
+    }
+
+    private prepareSendGridAttachments(attachments?: EmailAttachment[]): Array<Record<string, string | undefined>> | undefined {
+        if (!attachments || attachments.length === 0) return undefined;
+
+        const mapped: Array<Record<string, string | undefined>> = [];
+
+        for (const att of attachments) {
+                let content: string | undefined;
+
+                if (Buffer.isBuffer(att.content)) {
+                    content = att.content.toString('base64');
+                } else if (att.path) {
+                    content = fs.readFileSync(att.path).toString('base64');
+                }
+
+                if (!content) continue;
+
+                mapped.push({
+                    content,
+                    filename: att.filename,
+                    type: att.contentType,
+                    disposition: 'attachment',
+                    content_id: att.cid
+                });
+        }
+
+        return mapped.length > 0 ? mapped : undefined;
     }
 
     /**
