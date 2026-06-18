@@ -19,6 +19,7 @@ import User, {
     SystemSettings,
     PushToken
 } from '../../models/User';
+import Ranch from '../../models/Ranch';
 import { tokenService } from './TokenService';
 import { securityEventService } from './SecurityEventService';
 import { EventType, EventSeverity } from '../../models/SecurityEvent';
@@ -56,6 +57,10 @@ export interface UpdateUserDTO {
     systemSettings?: Partial<SystemSettings>;
     permissions?: Partial<UserPermissions>;
     isActive?: boolean;
+    emailVerified?: boolean;   // Fix D: verificación manual del email por admin
+    ranchId?: string;          // Asignar acceso a un rancho al modificar el usuario
+    replaceRanchAccess?: boolean; // true = MOVER (reemplaza accesos previos); false = AGREGAR
+    ownerRanchScope?: string[];   // Ámbito del OWNER (lo fija el controller). undefined = SUPER_ADMIN
 }
 
 export interface UserFilters {
@@ -427,6 +432,29 @@ export class UserService {
                 dataRetentionPeriod: 365 * 7
             };
 
+            // ── Asignación de rancho (Fix B) ─────────────────────────────
+            // Si se provee ranchId, se vincula al usuario vía ranchAccess para
+            // que getAccessibleRanchIds lo reconozca. Sin esto, los roles no
+            // privilegiados nacerían "ciegos" (sin acceso a ningún rancho).
+            // El controller (POST /api/admin/users) ya validó que el OWNER solo
+            // pueda asignar ranchos de su propiedad.
+            let ranchAccess: UserCreationAttributes['ranchAccess'] = undefined;
+            if (data.ranchId) {
+                const ranch = await Ranch.findByPk(data.ranchId, { transaction: t });
+                if (!ranch) {
+                    throw new ValidationError(`El rancho ${data.ranchId} no existe`);
+                }
+                ranchAccess = [{
+                    ranchId: ranch.id,
+                    ranchName: ranch.name,
+                    accessLevel: this.mapRoleToAccessLevel(role),
+                    permissions: [],
+                    grantedBy: data.createdBy || 'system',
+                    grantedDate: new Date(),
+                    isActive: true
+                }];
+            }
+
             // Crear usuario con TODOS los campos requeridos
             const user = await User.create({
                 userCode,  // ← PASADO EXPLÍCITAMENTE
@@ -462,6 +490,7 @@ export class UserService {
                 emailVerified: false,
                 phoneVerified: false,
                 createdBy: data.createdBy || null,
+                ranchAccess,         // ← Fix B: acceso al rancho asignado (si lo hay)
                 pushTokens: []       // ← PASADO EXPLÍCITAMENTE
             } as UserCreationAttributes, { transaction: t });
 
@@ -691,6 +720,74 @@ export class UserService {
 
             if (data.status) updateData.status = data.status;
             if (data.isActive !== undefined) updateData.isActive = data.isActive;
+
+            // ── Asignar / mover rancho al modificar (extensión Fix B) ─────
+            // Dos modos:
+            //   • replaceRanchAccess=false (default) → ADITIVO e idempotente:
+            //     concede acceso al rancho sin tocar los previos.
+            //   • replaceRanchAccess=true → MOVER: desactiva los accesos previos
+            //     y deja activo solo el rancho destino.
+            // Para un OWNER se pasa `ownerRanchScope` (sus ranchos): en modo
+            // mover SOLO desactiva accesos dentro de ese ámbito, para no quitarle
+            // al usuario accesos a ranchos ajenos al OWNER. SUPER_ADMIN sin ámbito
+            // (undefined) → mover desactiva todos los demás.
+            if (data.ranchId) {
+                const ranch = await Ranch.findByPk(data.ranchId, { transaction: t });
+                if (!ranch) {
+                    throw new ValidationError(`El rancho ${data.ranchId} no existe`);
+                }
+                const existing = (user.ranchAccess || []) as NonNullable<User['ranchAccess']>;
+                const effectiveRole = (data.role as UserRole) || user.role;
+                const targetEntry = {
+                    ranchId: ranch.id,
+                    ranchName: ranch.name,
+                    accessLevel: this.mapRoleToAccessLevel(effectiveRole),
+                    permissions: [] as string[],
+                    grantedBy: updatedBy || 'system',
+                    grantedDate: new Date(),
+                    isActive: true
+                };
+
+                if (data.replaceRanchAccess) {
+                    // MOVER: el resto de entradas (distintas al destino) se
+                    // desactivan, pero solo si están dentro del ámbito permitido.
+                    const others = existing
+                        .filter(a => a.ranchId !== ranch.id)
+                        .map(a => {
+                            const inScope = !data.ownerRanchScope || data.ownerRanchScope.includes(a.ranchId);
+                            return inScope ? { ...a, isActive: false } : a;
+                        });
+                    updateData.ranchAccess = [...others, targetEntry];
+                } else {
+                    // ADITIVO: agrega si no existe; reactiva si existía inactivo.
+                    const idx = existing.findIndex(a => a.ranchId === ranch.id);
+                    if (idx === -1) {
+                        updateData.ranchAccess = [...existing, targetEntry];
+                    } else if (!existing[idx].isActive) {
+                        const copy = [...existing];
+                        copy[idx] = { ...copy[idx], isActive: true, accessLevel: targetEntry.accessLevel };
+                        updateData.ranchAccess = copy;
+                    }
+                }
+            }
+
+            // ── Fix D: verificación manual del email por admin ───────────
+            // Se aplica DESPUÉS del bloque de cambio de email (que resetea
+            // emailVerified a false) para que la intención explícita del admin
+            // prevalezca. Al verificar, deja al usuario en estado coherente.
+            if (data.emailVerified !== undefined) {
+                updateData.emailVerified = data.emailVerified;
+                if (data.emailVerified === true) {
+                    if (user.verificationStatus === VerificationStatus.UNVERIFIED) {
+                        updateData.verificationStatus = VerificationStatus.EMAIL_VERIFIED;
+                    }
+                    // Si seguía pendiente de verificación y el admin no mandó otro
+                    // status en la misma petición, lo activamos.
+                    if (data.status === undefined && user.status === UserStatus.PENDING_VERIFICATION) {
+                        updateData.status = UserStatus.ACTIVE;
+                    }
+                }
+            }
 
             if (data.personalInfo) {
                 updateData.personalInfo = { ...user.personalInfo, ...data.personalInfo };
@@ -1040,6 +1137,28 @@ export class UserService {
      */
     private getDefaultPermissionsByRole(role: UserRole): UserPermissions {
         return DEFAULT_PERMISSIONS_BY_ROLE[role] || DEFAULT_PERMISSIONS_BY_ROLE[UserRole.VIEWER];
+    }
+
+    /**
+     * Mapea el rol global del usuario al nivel de acceso dentro de un rancho
+     * (campo ranchAccess.accessLevel). Se usa al asignar un rancho en el alta.
+     */
+    private mapRoleToAccessLevel(
+        role: UserRole
+    ): 'OWNER' | 'MANAGER' | 'EMPLOYEE' | 'CONSULTANT' | 'VIEWER' {
+        switch (role) {
+            case UserRole.OWNER:
+                return 'OWNER';
+            case UserRole.MANAGER:
+            case UserRole.RANCH_MANAGER:
+                return 'MANAGER';
+            case UserRole.VETERINARIAN:
+                return 'CONSULTANT';
+            case UserRole.WORKER:
+                return 'EMPLOYEE';
+            default:
+                return 'VIEWER';
+        }
     }
 
     /**

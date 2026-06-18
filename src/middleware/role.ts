@@ -338,7 +338,7 @@ export const requireComplexRole = (conditions: {
     // Verificar acceso veterinario
     if (conditions.veterinaryAccess) {
       const veterinaryRoles: UserRole[] = [
-        UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER
+        UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER
       ];
       
       if (!veterinaryRoles.includes(req.userRole)) {
@@ -351,7 +351,7 @@ export const requireComplexRole = (conditions: {
 
     // Verificar acceso financiero
     if (conditions.financialAccess) {
-      const financialRoles: UserRole[] = [UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER];
+      const financialRoles: UserRole[] = [UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER];
       
       if (!financialRoles.includes(req.userRole)) {
         return next(new AuthorizationError(

@@ -50,7 +50,7 @@ router.put(
  */
 router.get(
     '/',
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER),
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.RANCH_MANAGER),
     createRateLimit(EndpointType.REPORTS),
     userController.listUsers.bind(userController)
 );

@@ -50,6 +50,10 @@ export interface AuthResponse {
         permissions: any;
         lastLogin?: Date;
         isActive: boolean;
+        // El frontend usa ranchAccess para fijar el rancho activo tras login.
+        // Sin esto, activeRanchId quedaba en null y el dashboard salía vacío
+        // hasta recargar (F5), que sí pedía /users/profile (con ranchAccess).
+        ranchAccess?: any;
         emailVerificationQueued?: boolean;
         emailVerificationSent?: boolean;
     };
@@ -793,7 +797,8 @@ export class AuthService {
             phone: user.contactInfo.primaryPhone,
             permissions: user.permissions,
             lastLogin: user.lastLoginAt,
-            isActive: user.isActive
+            isActive: user.isActive,
+            ranchAccess: user.ranchAccess
         };
     }
 }

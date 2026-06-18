@@ -38,6 +38,7 @@ router.get(
         UserRole.WORKER,
         UserRole.VETERINARIAN,
         UserRole.MANAGER,
+        UserRole.RANCH_MANAGER,
         UserRole.SUPER_ADMIN,
         UserRole.OWNER
     ),
@@ -69,6 +70,7 @@ router.post(
         UserRole.WORKER,
         UserRole.VETERINARIAN,
         UserRole.MANAGER,
+        UserRole.RANCH_MANAGER,
         UserRole.SUPER_ADMIN,
         UserRole.OWNER
     ),
@@ -96,6 +98,7 @@ router.get(
         UserRole.WORKER,
         UserRole.VETERINARIAN,
         UserRole.MANAGER,
+        UserRole.RANCH_MANAGER,
         UserRole.SUPER_ADMIN,
         UserRole.OWNER
     ),
@@ -122,6 +125,7 @@ router.post(
         UserRole.WORKER,
         UserRole.VETERINARIAN,
         UserRole.MANAGER,
+        UserRole.RANCH_MANAGER,
         UserRole.SUPER_ADMIN,
         UserRole.OWNER
     ),
@@ -148,6 +152,7 @@ router.post(
         UserRole.WORKER,
         UserRole.VETERINARIAN,
         UserRole.MANAGER,
+        UserRole.RANCH_MANAGER,
         UserRole.SUPER_ADMIN,
         UserRole.OWNER
     ),
@@ -178,6 +183,7 @@ router.post(
         UserRole.WORKER,
         UserRole.VETERINARIAN,
         UserRole.MANAGER,
+        UserRole.RANCH_MANAGER,
         UserRole.SUPER_ADMIN,
         UserRole.OWNER
     ),
@@ -202,6 +208,7 @@ router.get(
         UserRole.WORKER,
         UserRole.VETERINARIAN,
         UserRole.MANAGER,
+        UserRole.RANCH_MANAGER,
         UserRole.SUPER_ADMIN,
         UserRole.OWNER
     ),
@@ -226,6 +233,7 @@ router.post(
         UserRole.WORKER,
         UserRole.VETERINARIAN,
         UserRole.MANAGER,
+        UserRole.RANCH_MANAGER,
         UserRole.SUPER_ADMIN,
         UserRole.OWNER
     ),

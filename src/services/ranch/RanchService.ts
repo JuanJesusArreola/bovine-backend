@@ -1,11 +1,12 @@
 // services/ranch/RanchService.ts
-import { Op, Transaction } from 'sequelize';
+import { Op, Transaction, QueryTypes } from 'sequelize';
 import sequelize from '../../config/database';
 import logger from '../../utils/logger';
 import { RanchNotFoundError, RanchValidationError, RanchCapacityError } from '../../utils/RanchErrors';
 import { ensureError } from '../../utils/errorUtils';
 
 import Ranch, { RanchAttributes, RanchCreationAttributes, RanchType, RanchStatus } from '../../models/Ranch';
+import User from '../../models/User';
 import type { GeofenceConfig } from '../../models/Location';
 import { isPointInBoundary } from '../../utils/geoUtils';
 import Bovine from '../../models/Bovine';
@@ -86,6 +87,9 @@ export interface RanchFilters {
   searchTerm?: string;
   limit?: number;
   offset?: number;
+  // Scoping por usuario: si se provee, solo se devuelven estos ranchos.
+  // `[]` (array vacío) significa "ninguno" → devuelve lista vacía.
+  ranchIds?: string[];
 }
 
 export interface RanchSummary {
@@ -173,6 +177,15 @@ export class RanchCoreService {
 
       const ranch = await Ranch.create(ranchData, { transaction: t });
 
+      // ── Fix A: registrar la pertenencia del creador ─────────────────
+      // Al crear un rancho, el creador queda vinculado a él vía ranchAccess
+      // (accessLevel OWNER). Sin esto, un OWNER aparecía "sin rancho" y el
+      // scoping por rancho (p. ej. crear usuarios de su rancho) no encontraba
+      // ningún rancho suyo.
+      if (data.createdBy) {
+        await this.grantCreatorRanchAccess(data.createdBy, ranch, t);
+      }
+
       if (isOwnTransaction) await t.commit();
 
       logger.info(`Rancho creado: ${ranch.id}`, this.context, {
@@ -185,9 +198,96 @@ export class RanchCoreService {
       return ranch;
     } catch (error) {
       if (isOwnTransaction) await t.rollback();
-      logger.error('Error creando rancho', this.context, { data }, ensureError(error));
+      // Sequelize envuelve el error real de Postgres en `parent`/`original`.
+      // Lo exponemos para no perder el mensaje/detalle (constraint, columna, code).
+      const pg = (error as any)?.parent || (error as any)?.original;
+      logger.error('Error creando rancho', this.context, {
+        data,
+        dbMessage: pg?.message,
+        dbDetail: pg?.detail,
+        dbCode: pg?.code,
+        dbConstraint: pg?.constraint,
+        dbColumn: pg?.column,
+        dbTable: pg?.table,
+      }, ensureError(error));
       throw error;
     }
+  }
+
+  /**
+   * Fix A — Vincula al creador de un rancho con dicho rancho a través de su
+   * `ranchAccess` (accessLevel OWNER). Es idempotente: si el usuario ya tiene
+   * acceso activo a ese rancho, no hace nada. Si el creador no existe, no
+   * rompe la creación del rancho (solo se omite el vínculo).
+   */
+  private async grantCreatorRanchAccess(
+    userId: string,
+    ranch: Ranch,
+    transaction: Transaction
+  ): Promise<void> {
+    const user = await User.findByPk(userId, { transaction });
+    if (!user) return;
+
+    const existing = (user.ranchAccess || []) as NonNullable<User['ranchAccess']>;
+    if (existing.some((a) => a.ranchId === ranch.id && a.isActive)) return;
+
+    const updated = [
+      ...existing,
+      {
+        ranchId: ranch.id,
+        ranchName: ranch.name,
+        accessLevel: 'OWNER' as const,
+        permissions: [],
+        grantedBy: userId,
+        grantedDate: new Date(),
+        isActive: true,
+      },
+    ];
+
+    await user.update({ ranchAccess: updated }, { transaction });
+  }
+
+  /**
+   * Propaga el nuevo nombre de un rancho al campo denormalizado `ranchName`
+   * dentro del `ranchAccess` (JSONB) de cada usuario que tenga acceso a él.
+   * Sin esto, el topbar / badges mostraban el nombre viejo tras renombrar.
+   */
+  private async syncRanchNameInUsersAccess(
+    ranchId: string,
+    newName: string,
+    transaction: Transaction
+  ): Promise<void> {
+    // Usuarios cuyo ranchAccess contiene este rancho (cualquier entrada).
+    const rows = await sequelize.query<{ id: string }>(
+      `SELECT id FROM users
+         WHERE deleted_at IS NULL
+           AND EXISTS (
+             SELECT 1 FROM jsonb_array_elements(ranch_access) AS access
+             WHERE access->>'ranchId' = :ranchId
+           )`,
+      { replacements: { ranchId }, type: QueryTypes.SELECT, transaction }
+    );
+
+    for (const { id } of rows) {
+      const user = await User.findByPk(id, { transaction });
+      if (!user) continue;
+
+      const access = (user.ranchAccess || []) as NonNullable<User['ranchAccess']>;
+      let changed = false;
+      const updated = access.map((a) => {
+        if (a.ranchId === ranchId && a.ranchName !== newName) {
+          changed = true;
+          return { ...a, ranchName: newName };
+        }
+        return a;
+      });
+      if (changed) await user.update({ ranchAccess: updated }, { transaction });
+    }
+
+    logger.info(
+      `ranchName sincronizado en ${rows.length} usuario(s) tras renombrar rancho ${ranchId}`,
+      this.context
+    );
   }
 
   async updateRanch(data: UpdateRanchDTO, transaction?: Transaction): Promise<Ranch> {
@@ -198,6 +298,10 @@ export class RanchCoreService {
     try {
       const ranch = await Ranch.findByPk(data.id, { transaction: t });
       if (!ranch) throw new RanchNotFoundError(data.id);
+
+      // Nombre previo: para detectar un rename y propagarlo al `ranchAccess`
+      // denormalizado de los usuarios (el topbar y los badges lo muestran).
+      const previousName = ranch.name;
 
       // Validar área de pastoreo vs total si se actualizan
       if (data.grazingArea && data.totalArea && data.grazingArea > data.totalArea) {
@@ -221,6 +325,12 @@ export class RanchCoreService {
       }
 
       await ranch.update(updateData, { transaction: t });
+
+      // Si cambió el nombre, sincronizar el `ranchName` denormalizado en el
+      // ranchAccess de todos los usuarios con acceso a este rancho.
+      if (typeof data.name === 'string' && data.name !== previousName) {
+        await this.syncRanchNameInUsersAccess(data.id, data.name, t);
+      }
 
       if (isOwnTransaction) await t.commit();
 
@@ -273,6 +383,7 @@ export class RanchCoreService {
   async listRanches(filters: RanchFilters = {}): Promise<{ rows: Ranch[]; count: number }> {
     try {
       const where: any = {};
+      if (filters.ranchIds) where.id = { [Op.in]: filters.ranchIds };
       if (filters.type?.length) where.type = { [Op.in]: filters.type };
       if (filters.status?.length) where.status = { [Op.in]: filters.status };
       if (filters.isActive !== undefined) where.isActive = filters.isActive;

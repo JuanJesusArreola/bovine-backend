@@ -533,9 +533,12 @@ export class NotificationService {
         }
 
         if (filters.startDate || filters.endDate) {
-            where.createdAt = {};
-            if (filters.startDate) where.createdAt[Op.gte] = filters.startDate;
-            if (filters.endDate) where.createdAt[Op.lte] = filters.endDate;
+            // Usar la columna real `created_at` (snake_case). Con `createdAt`
+            // Sequelize generaba "Notification"."createdAt", que no existe, y la
+            // query del dashboard fallaba. Igual que el `order: ['created_at']`.
+            where.created_at = {};
+            if (filters.startDate) where.created_at[Op.gte] = filters.startDate;
+            if (filters.endDate) where.created_at[Op.lte] = filters.endDate;
         }
 
         if (filters.read !== undefined) {

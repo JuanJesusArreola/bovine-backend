@@ -2,6 +2,7 @@
 import { Request, Response } from 'express';
 import { ranchCoreService } from '../../services/ranch/RanchService';
 import { RanchError } from '../../utils/RanchErrors';
+import { UserRole } from '../../models/User';
 import logger from '../../utils/logger';
 
 export class RanchCoreController {
@@ -185,6 +186,16 @@ export class RanchCoreController {
       if (searchTerm) filters.searchTerm = searchTerm as string;
       if (limit) filters.limit = parseInt(limit as string);
       if (offset) filters.offset = parseInt(offset as string);
+
+      // ── Scoping por usuario ──────────────────────────────────────
+      // SUPER_ADMIN ve todos los ranchos. Cualquier otro rol solo ve los
+      // ranchos a los que pertenece (su ranchAccess activo). Sin ranchAccess
+      // → array vacío → no ve ninguno.
+      if (req.userRole !== UserRole.SUPER_ADMIN) {
+        filters.ranchIds = req.user?.ranchAccess
+          ?.filter(a => a.isActive)
+          .map(a => a.ranchId) || [];
+      }
 
       const result = await ranchCoreService.listRanches(filters);
       res.json({

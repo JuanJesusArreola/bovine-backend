@@ -111,7 +111,11 @@ const findUserById = async (userId: string): Promise<User | null> => {
         'updated_at',
         'isActive',
         'emailVerified',
-        'subscriptionInfo'
+        'subscriptionInfo',
+        // Necesario para el scoping por rancho: listRanches/listUsers/createUser
+        // y demás leen req.user.ranchAccess. Sin este atributo llegaba undefined
+        // y el OWNER no veía sus ranchos (y veía todos los usuarios).
+        'ranchAccess'
       ]
     });
   } catch (error) {

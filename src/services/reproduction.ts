@@ -125,7 +125,10 @@ export class ReproductionService {
       include: [
         {
           model: this.bovineModel,
-          as: 'dam',
+          // El alias correcto de Reproduction→Bovine (madre, fk bovineId) es
+          // 'bovine'. 'dam' no existe → Sequelize lo ignoraba y veía Bovine
+          // asociado 3 veces (bovine/sire/offspring) → error de include.
+          as: 'bovine',
           where: {
             ranchId,
             isActive: true,

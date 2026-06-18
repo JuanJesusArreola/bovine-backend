@@ -20,7 +20,7 @@ router.use(authenticateToken);
 // "records" como parámetro :id.
 router.get(
     '/records',
-    authorizeRoles(UserRole.VETERINARIAN, UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER),
+    authorizeRoles(UserRole.VETERINARIAN, UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.RANCH_MANAGER),
     healthController.getHealthRecords
 );
 
@@ -63,7 +63,7 @@ router.post(
 );
 router.get(
     '/diagnosis/stats',
-    authorizeRoles(UserRole.VETERINARIAN, UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER),
+    authorizeRoles(UserRole.VETERINARIAN, UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.RANCH_MANAGER),
     diagnosisController.getDiagnosisStats
 );
 
@@ -85,7 +85,7 @@ router.post(
 );
 router.get(
   '/treatment/withdrawal/:healthId',
-  authorizeRoles(UserRole.VETERINARIAN, UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER),
+  authorizeRoles(UserRole.VETERINARIAN, UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.RANCH_MANAGER),
   treatmentController.checkWithdrawalPeriods
 );
 
@@ -97,17 +97,17 @@ router.post(
 );
 router.get(
   '/laboratory/abnormal/:healthId',
-  authorizeRoles(UserRole.VETERINARIAN, UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER),
+  authorizeRoles(UserRole.VETERINARIAN, UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.RANCH_MANAGER),
   laboratoryController.getAbnormalResults
 );
 router.get(
   '/laboratory/bovine/:bovineId/abnormal',
-  authorizeRoles(UserRole.VETERINARIAN, UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER),
+  authorizeRoles(UserRole.VETERINARIAN, UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.RANCH_MANAGER),
   laboratoryController.getAbnormalResultsByBovine
 );
 router.get(
   '/laboratory/ranch/:ranchId/abnormal',
-  authorizeRoles(UserRole.VETERINARIAN, UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER),
+  authorizeRoles(UserRole.VETERINARIAN, UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.RANCH_MANAGER),
   laboratoryController.getAbnormalResultsByRanch
 );
 

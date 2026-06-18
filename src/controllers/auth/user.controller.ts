@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import { userService } from '../../services/auth';
 import { ValidationError } from '../../utils/errorUtils';
 import { UserRole } from '../../models/User';
+import { canAssignRole, ROLE_CREATION_HIERARCHY } from '../../utils/roleHierarchy';
 import logger from '../../utils/logger';
 
 export class UserController {
@@ -162,11 +163,15 @@ export class UserController {
                     // Si no pidió ranchId, usar el primero de sus ranchos
                     effectiveRanchId = ownerRanchIds[0];
                 }
-            } else if (req.userRole === UserRole.MANAGER && requestingUser) {
-                // MANAGER: forzar filtro por su rancho
-                const managerRanchId = requestingUser.ranchAccess
+            } else if (
+                (req.userRole === UserRole.MANAGER || req.userRole === UserRole.RANCH_MANAGER)
+                && requestingUser
+            ) {
+                // MANAGER / RANCH_MANAGER: solo pueden VER usuarios de su rancho
+                // (no gestionarlos). Forzamos el filtro a su rancho activo.
+                const scopedRanchId = requestingUser.ranchAccess
                     ?.find(a => a.isActive)?.ranchId;
-                effectiveRanchId = managerRanchId || '';
+                effectiveRanchId = scopedRanchId || '';
             }
 
             const filters = {
@@ -198,6 +203,11 @@ export class UserController {
                     roleLabel: user.getRoleLabel(),
                     status: user.status,
                     fullName: user.getFullName(),
+                    // Campos individuales para que la lista muestre nombre/iniciales
+                    // y el modal de edición pueda precargar sin pedir el detalle.
+                    firstName: user.personalInfo?.firstName,
+                    lastName: user.personalInfo?.lastName,
+                    phone: user.contactInfo?.primaryPhone,
                     isActive: user.isActive,
                     emailVerified: user.emailVerified,
                     lastLoginAt: user.lastLoginAt,
@@ -276,6 +286,7 @@ export class UserController {
         try {
             const { id } = req.params;
             const userId = req.user?.id;
+            const requestingRole = req.userRole;
             const {
                 firstName,
                 lastName,
@@ -284,8 +295,74 @@ export class UserController {
                 role,
                 status,
                 isActive,
-                permissions
+                emailVerified,
+                permissions,
+                ranchId,
+                replaceRanchAccess
             } = req.body;
+
+            // Ámbito de ranchos del OWNER (para acotar el modo "mover"). Para
+            // SUPER_ADMIN queda undefined → sin límite. Se rellena abajo.
+            let ownerRanchScope: string[] | undefined = undefined;
+
+            // ── Fix C: anti-escalada de rol en la edición ────────────────
+            // Misma jerarquía que la creación (POST /api/admin/users). Sin
+            // esto, un OWNER podía promover a un usuario a SUPER_ADMIN vía PUT.
+            if (role) {
+                // 1) Nadie puede cambiar su propio rol (evita auto-escalada).
+                if (id === userId) {
+                    res.status(403).json({
+                        success: false,
+                        error: 'No puedes cambiar tu propio rol',
+                        code: 'SELF_ROLE_CHANGE_FORBIDDEN'
+                    });
+                    return;
+                }
+                // 2) El rol asignado debe estar permitido por la jerarquía.
+                if (!canAssignRole(requestingRole, role as UserRole)) {
+                    const allowed = ROLE_CREATION_HIERARCHY[requestingRole as string] || [];
+                    res.status(403).json({
+                        success: false,
+                        error: `No puedes asignar el rol ${role}. Roles permitidos: ${allowed.join(', ')}`,
+                        code: 'ROLE_HIERARCHY_VIOLATION'
+                    });
+                    return;
+                }
+            }
+
+            // ── Scoping por rancho: OWNER solo edita usuarios de su rancho ─
+            // (mismo criterio que deactivate/activate). SUPER_ADMIN sin límite.
+            if (req.userRole === UserRole.OWNER && req.user) {
+                const ownerRanchIds = req.user.ranchAccess
+                    ?.filter(a => a.isActive)
+                    .map(a => a.ranchId) || [];
+                ownerRanchScope = ownerRanchIds;
+
+                const targetUser = await userService.getUserById(id);
+                if (targetUser) {
+                    const targetInOwnerRanch = targetUser.ranchAccess?.some(
+                        a => a.isActive && ownerRanchIds.includes(a.ranchId)
+                    );
+                    if (!targetInOwnerRanch) {
+                        res.status(403).json({
+                            success: false,
+                            error: 'Solo puedes gestionar usuarios de tu rancho',
+                            code: 'RANCH_ACCESS_DENIED'
+                        });
+                        return;
+                    }
+                }
+
+                // Si asigna un rancho, debe ser uno de los suyos.
+                if (ranchId && !ownerRanchIds.includes(ranchId)) {
+                    res.status(403).json({
+                        success: false,
+                        error: 'Solo puedes asignar usuarios a tus propios ranchos',
+                        code: 'RANCH_ACCESS_DENIED'
+                    });
+                    return;
+                }
+            }
 
             const user = await userService.updateUser(
                 id,
@@ -297,7 +374,11 @@ export class UserController {
                     role,
                     status,
                     isActive,
-                    permissions
+                    emailVerified,
+                    permissions,
+                    ranchId,
+                    replaceRanchAccess,
+                    ownerRanchScope
                 },
                 userId
             );
@@ -309,7 +390,13 @@ export class UserController {
                     email: user.email,
                     role: user.role,
                     status: user.status,
-                    isActive: user.isActive
+                    isActive: user.isActive,
+                    emailVerified: user.emailVerified,
+                    ranchAccess: user.ranchAccess?.filter(a => a.isActive).map(a => ({
+                        ranchId: a.ranchId,
+                        ranchName: a.ranchName,
+                        accessLevel: a.accessLevel
+                    }))
                 },
                 message: 'Usuario actualizado exitosamente'
             });

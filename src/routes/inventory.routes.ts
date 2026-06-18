@@ -21,7 +21,7 @@ router.use(authenticateToken);
  */
 router.get(
     '/',
-    authorizeRoles(UserRole.VIEWER, UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN),
+    authorizeRoles(UserRole.VIEWER, UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN),
     inventoryController.getInventory
 );
 
@@ -31,7 +31,7 @@ router.get(
  */
 router.get(
     '/:itemId',
-    authorizeRoles(UserRole.VIEWER, UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN),
+    authorizeRoles(UserRole.VIEWER, UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN),
     inventoryController.getInventoryItem
 );
 
@@ -41,7 +41,7 @@ router.get(
  */
 router.get(
     '/valuation/:ranchId',
-    authorizeRoles(UserRole.MANAGER, UserRole.SUPER_ADMIN),
+    authorizeRoles(UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN),
     inventoryController.calculateValuation
 );
 
@@ -51,7 +51,7 @@ router.get(
  */
 router.get(
     '/alerts/:ranchId',
-    authorizeRoles(UserRole.MANAGER, UserRole.SUPER_ADMIN),
+    authorizeRoles(UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN),
     inventoryController.getInventoryAlerts
 );
 
@@ -65,7 +65,7 @@ router.get(
  */
 router.post(
     '/:itemId/update-stock',
-    authorizeRoles(UserRole.MANAGER, UserRole.SUPER_ADMIN),
+    authorizeRoles(UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN),
     validateInventory('updateStock'),
     inventoryController.updateStock
 );
@@ -76,7 +76,7 @@ router.post(
  */
 router.post(
     '/:itemId/reserve',
-    authorizeRoles(UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN),
+    authorizeRoles(UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN),
     validateInventory('reserveStock'),
     inventoryController.reserveStock
 );
@@ -87,7 +87,7 @@ router.post(
  */
 router.post(
     '/:itemId/release',
-    authorizeRoles(UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN),
+    authorizeRoles(UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN),
     validateInventory('releaseStock'),
     inventoryController.releaseStock
 );

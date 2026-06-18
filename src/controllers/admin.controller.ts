@@ -4,34 +4,8 @@ import { updateRanchProductionJob } from '../jobs/updateRanchProduction';
 import { userService } from '../services/auth';
 import { ValidationError } from '../utils/errorUtils';
 import { UserRole } from '../models/User';
+import { ROLE_CREATION_HIERARCHY } from '../utils/roleHierarchy';
 import logger from '../utils/logger';
-
-// ============================================================================
-// JERARQUÍA DE ROLES
-// ============================================================================
-// Define qué roles puede crear cada rol.
-// La clave es el rol del solicitante, el valor es la lista de roles que puede crear.
-// SUPER_ADMIN puede crear cualquier rol incluyendo otro SUPER_ADMIN.
-// OWNER puede crear todos los roles debajo del suyo.
-
-const ROLE_CREATION_HIERARCHY: Record<string, UserRole[]> = {
-    [UserRole.SUPER_ADMIN]: [
-        UserRole.SUPER_ADMIN,
-        UserRole.OWNER,
-        UserRole.RANCH_MANAGER,
-        UserRole.MANAGER,
-        UserRole.VETERINARIAN,
-        UserRole.WORKER,
-        UserRole.VIEWER
-    ],
-    [UserRole.OWNER]: [
-        UserRole.RANCH_MANAGER,
-        UserRole.MANAGER,
-        UserRole.VETERINARIAN,
-        UserRole.WORKER,
-        UserRole.VIEWER
-    ]
-};
 
 export class AdminController {
     private readonly context = 'AdminController';

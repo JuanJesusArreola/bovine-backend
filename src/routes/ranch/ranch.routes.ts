@@ -11,7 +11,7 @@ const router = Router();
 router.use(authenticateToken);
 
 // Rutas CRUD
-router.post('/', validateRanch('createRanch'), ranchCoreController.createRanch);
+router.post('/', authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN), validateRanch('createRanch'), ranchCoreController.createRanch);
 router.get('/', ranchCoreController.listRanches);
 router.get('/:id', validateId('id'), ranchCoreController.getRanchById);
 router.put('/:id', validateId('id'), validateRanch('updateRanch'), ranchCoreController.updateRanch);
