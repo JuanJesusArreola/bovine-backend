@@ -159,8 +159,12 @@ export interface NotificationConfig {
 
 export interface EventAttributes {
   id: string;
-  bovineId: string;
-  
+  // Un evento apunta a UN bovino (acción individual) O a UNA localización
+  // (campaña que abarca a los bovinos de esa ubicación). Al menos uno de los
+  // dos debe venir; la regla la valida el modelo (validate) y el servicio.
+  bovineId?: string;
+  locationId?: string;
+
   // Relación con Health (cuando se complete)
   healthRecordId?: string;  // Se llena al completarse
   
@@ -182,8 +186,12 @@ export interface EventAttributes {
   expectedLocation?: LocationData;
   
   // Responsables
-  assignedTo?: string;      // ID del usuario asignado
+  assignedTo?: string;      // (legacy) un único usuario asignado
   veterinarianId?: string;  // ID del veterinario (si aplica)
+  // Múltiples responsables (trabajadores y/o veterinarios). Vacío = evento
+  // ABIERTO (lo ven todos los del rancho). Con IDs = evento DIRIGIDO (lo ven
+  // solo esos usuarios + gestores + el creador).
+  assignedToIds?: string[];
   
   // Costo estimado
   estimatedCost?: number;
@@ -231,8 +239,8 @@ export interface EventAttributes {
 // Atributos opcionales al crear
 export interface EventCreationAttributes
   extends Optional<EventAttributes,
-    'id' | 'healthRecordId' | 'description' | 'startDate' | 'endDate' |
-    'expectedLocation' | 'assignedTo' | 'veterinarianId' | 'estimatedCost' |
+    'id' | 'bovineId' | 'locationId' | 'healthRecordId' | 'description' | 'startDate' | 'endDate' |
+    'expectedLocation' | 'assignedTo' | 'veterinarianId' | 'assignedToIds' | 'estimatedCost' |
     'currency' | 'expectedData' | 'recurrence' | 'parentEventId' |
     'notifications' | 'attachments' | 'planningNotes' | 'internalNotes' |
     'requiresEquipment' | 'requiresFacility' | 'reminderSent' | 'reminderDate' |
@@ -244,7 +252,8 @@ class Event extends Model<EventAttributes, EventCreationAttributes>
   implements EventAttributes {
   
   public id!: string;
-  public bovineId!: string;
+  public bovineId?: string;
+  public locationId?: string;
   public healthRecordId?: string;
   public eventType!: EventType;
   public title!: string;
@@ -257,6 +266,7 @@ class Event extends Model<EventAttributes, EventCreationAttributes>
   public expectedLocation?: LocationData;
   public assignedTo?: string;
   public veterinarianId?: string;
+  public assignedToIds?: string[];
   public estimatedCost?: number;
   public currency?: string;
   public expectedData?: ExpectedEventData;
@@ -295,14 +305,25 @@ Event.init(
     },
     bovineId: {
       type: DataTypes.UUID,
-      allowNull: false,
+      allowNull: true, // Opcional: un evento puede ser de localización (campaña).
       references: {
         model: 'bovines',
         key: 'id'
       },
       onUpdate: 'CASCADE',
       onDelete: 'CASCADE',
-      comment: 'ID del bovino relacionado con el evento'
+      comment: 'ID del bovino relacionado (eventos individuales). Null en campañas por localización.'
+    },
+    locationId: {
+      type: DataTypes.UUID,
+      allowNull: true, // Opcional: presente en eventos de campaña por ubicación.
+      references: {
+        model: 'locations',
+        key: 'id'
+      },
+      onUpdate: 'CASCADE',
+      onDelete: 'CASCADE',
+      comment: 'ID de la localización (eventos de campaña). Null en eventos individuales.'
     },
     healthRecordId: {
       type: DataTypes.UUID,
@@ -389,6 +410,12 @@ Event.init(
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID del veterinario responsable (si aplica)'
+    },
+    assignedToIds: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+      defaultValue: [],
+      comment: 'IDs de responsables (trabajadores/veterinarios). Vacío = evento abierto.'
     },
     estimatedCost: {
       type: DataTypes.DECIMAL(12, 2),
@@ -509,6 +536,7 @@ Event.init(
     paranoid: true,
     indexes: [
       { fields: ['bovine_id'] },
+      { fields: ['location_id'] },
       { fields: ['event_type'] },
       { fields: ['status'] },
       { fields: ['priority'] },
@@ -537,10 +565,15 @@ Event.init(
 
       // Hook para validaciones de integridad
       beforeSave: async (event: Event) => {
-        // Si se completa, debe tener healthRecordId
-        if (event.status === EventStatus.COMPLETED && !event.healthRecordId) {
-          throw new Error('Los eventos completados deben referenciar un registro de salud');
+        // Un evento debe apuntar a un bovino (individual) o a una localización
+        // (campaña). No puede quedar sin ninguno de los dos.
+        if (!event.bovineId && !event.locationId) {
+          throw new Error('El evento debe estar asociado a un bovino o a una localización');
         }
+
+        // Nota: el enlace con un registro de salud (healthRecordId) es OPCIONAL
+        // al completar. Los eventos clínicos individuales pueden enlazarlo, pero
+        // las campañas y eventos no clínicos se completan sin uno.
 
         // Validar fechas
         if (event.startDate && event.endDate) {

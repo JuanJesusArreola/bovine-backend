@@ -519,7 +519,8 @@ export class BovineTrackingController {
                 return;
             }
 
-            const stats = await bovineTrackingService.getGeoStatistics(ranchId, daysNum);
+            // KPIs del mapa (contrato que consume el frontend /maps).
+            const stats = await bovineTrackingService.getGeoStats(ranchId);
 
             res.json({
                 success: true,

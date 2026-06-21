@@ -2,17 +2,23 @@
 import { Op, Transaction, QueryTypes } from 'sequelize';
 import sequelize from '../../config/database';
 import logger from '../../utils/logger';
-import { RanchNotFoundError, RanchValidationError, RanchCapacityError } from '../../utils/RanchErrors';
+import { RanchNotFoundError, RanchValidationError, RanchCapacityError, RanchAccessDeniedError } from '../../utils/RanchErrors';
 import { ensureError } from '../../utils/errorUtils';
 
 import Ranch, { RanchAttributes, RanchCreationAttributes, RanchType, RanchStatus } from '../../models/Ranch';
-import User from '../../models/User';
+import User, { UserRole } from '../../models/User';
 import type { GeofenceConfig } from '../../models/Location';
 import { isPointInBoundary } from '../../utils/geoUtils';
 import Bovine from '../../models/Bovine';
 import Location from '../../models/Location';
 import LocationCapacity from '../../models/LocationCapacity';
 import BovineLocationHistory from '../../models/BovineLocationHistory';
+// Modelos para el borrado total (cascada acotada).
+import Finance from '../../models/Finance';
+import Production from '../../models/Production';
+import Reproduction from '../../models/Reproduction';
+import EpidemiologicalSnapshot from '../../models/EpidemiologicalSnapshot';
+import EpidemiologyAlert from '../../models/EpidemiologyAlert';
 
 // ============================================================================
 // HELPERS — Conteo en vivo de cattle por rancho
@@ -80,6 +86,17 @@ export interface UpdateRanchDTO extends Partial<CreateRanchDTO> {
   updatedBy: string;
 }
 
+/**
+ * Quién ejecuta una mutación sobre un rancho. Se usa para verificar propiedad
+ * (scoping) y prevenir IDOR: un OWNER/RANCH_MANAGER solo puede mutar ranchos
+ * dentro de su `ranchAccess`. SUPER_ADMIN tiene acceso global.
+ */
+export interface RanchActor {
+  role: UserRole;
+  /** IDs de ranchos a los que el actor tiene acceso ACTIVO. */
+  ranchIds: string[];
+}
+
 export interface RanchFilters {
   type?: RanchType[];
   status?: RanchStatus[];
@@ -90,6 +107,8 @@ export interface RanchFilters {
   // Scoping por usuario: si se provee, solo se devuelven estos ranchos.
   // `[]` (array vacío) significa "ninguno" → devuelve lista vacía.
   ranchIds?: string[];
+  // Solo SUPER_ADMIN: incluir ranchos soft-deleted (desactivados) en el listado.
+  includeDeleted?: boolean;
 }
 
 export interface RanchSummary {
@@ -290,12 +309,29 @@ export class RanchCoreService {
     );
   }
 
-  async updateRanch(data: UpdateRanchDTO, transaction?: Transaction): Promise<Ranch> {
+  /**
+   * Verifica que `actor` tenga permiso para mutar el rancho `ranchId`.
+   * SUPER_ADMIN siempre pasa. Cualquier otro rol debe tener el rancho en su
+   * `ranchAccess` activo; si no, lanza 403 (previene IDOR horizontal).
+   * Si `actor` es undefined (llamada interna/legacy) NO se aplica scoping.
+   */
+  private assertRanchAccess(ranchId: string, actor?: RanchActor): void {
+    if (!actor) return;
+    if (actor.role === UserRole.SUPER_ADMIN) return;
+    if (!actor.ranchIds.includes(ranchId)) {
+      throw new RanchAccessDeniedError(ranchId);
+    }
+  }
+
+  async updateRanch(data: UpdateRanchDTO, actor?: RanchActor, transaction?: Transaction): Promise<Ranch> {
     const t = transaction || await sequelize.transaction();
     const isOwnTransaction = !transaction;
     const startTime = Date.now();
 
     try {
+      // Scoping/IDOR: verificar propiedad antes de tocar nada.
+      this.assertRanchAccess(data.id, actor);
+
       const ranch = await Ranch.findByPk(data.id, { transaction: t });
       if (!ranch) throw new RanchNotFoundError(data.id);
 
@@ -348,11 +384,14 @@ export class RanchCoreService {
     }
   }
 
-  async deleteRanch(id: string, deletedBy: string): Promise<void> {
+  async deleteRanch(id: string, deletedBy: string, actor?: RanchActor): Promise<void> {
     const transaction = await sequelize.transaction();
     const startTime = Date.now();
 
     try {
+      // Scoping/IDOR: verificar propiedad antes de borrar.
+      this.assertRanchAccess(id, actor);
+
       const ranch = await Ranch.findByPk(id, { transaction });
       if (!ranch) throw new RanchNotFoundError(id);
 
@@ -368,6 +407,104 @@ export class RanchCoreService {
       await transaction.rollback();
       logger.error(`Error eliminando rancho ${id}`, this.context, { id }, ensureError(error));
       throw error;
+    }
+  }
+
+  /**
+   * Reactiva un rancho soft-deleted (limpia deleted_at). Solo SUPER_ADMIN.
+   */
+  async restoreRanch(id: string): Promise<Ranch> {
+    const ranch = await Ranch.findByPk(id, { paranoid: false });
+    if (!ranch) throw new RanchNotFoundError(id);
+    if (!ranch.deletedAt) return ranch; // ya estaba activo
+    await ranch.restore();
+    logger.info(`Rancho restaurado: ${id}`, this.context, { ranchId: id });
+    return ranch;
+  }
+
+  /**
+   * BORRADO TOTAL (a nivel BD) — irreversible. Cascada ACOTADA:
+   * elimina bovinos, ubicaciones, finanzas, producción, reproducción,
+   * snapshots y alertas del rancho (por ranchId/bovineId), limpia el
+   * ranchAccess de los usuarios y borra el rancho definitivamente.
+   * NO persigue tablas derivadas de 2º nivel (síntomas de caso, etc.).
+   */
+  async hardDeleteRanch(id: string): Promise<void> {
+    const t = await sequelize.transaction();
+    const startTime = Date.now();
+    try {
+      // Incluir soft-deleted: se puede borrar permanentemente algo ya desactivado.
+      const ranch = await Ranch.findByPk(id, { paranoid: false, transaction: t });
+      if (!ranch) throw new RanchNotFoundError(id);
+
+      const bovines = await Bovine.findAll({
+        where: { ranchId: id },
+        attributes: ['id'],
+        paranoid: false,
+        transaction: t,
+      });
+      const bovineIds = bovines.map((b) => b.id);
+
+      const force = { force: true, transaction: t };
+
+      // Registros ligados a los bovinos del rancho.
+      if (bovineIds.length > 0) {
+        await Production.destroy({ where: { bovineId: { [Op.in]: bovineIds } }, ...force });
+        await Finance.destroy({ where: { bovineId: { [Op.in]: bovineIds } }, ...force });
+      }
+
+      // Registros ligados directamente al rancho.
+      await Finance.destroy({ where: { ranchId: id }, ...force });
+      await Reproduction.destroy({ where: { ranchId: id }, ...force });
+      await EpidemiologicalSnapshot.destroy({ where: { ranchId: id }, ...force });
+      await EpidemiologyAlert.destroy({ where: { ranchId: id }, ...force });
+      await Location.destroy({ where: { ranchId: id }, ...force });
+      await Bovine.destroy({ where: { ranchId: id }, ...force });
+
+      // Quitar el rancho del ranchAccess de todos los usuarios.
+      await this.removeRanchFromAllUsersAccess(id, t);
+
+      // Borrar el rancho definitivamente.
+      await ranch.destroy({ force: true, transaction: t });
+
+      await t.commit();
+      logger.warn(
+        `Rancho ELIMINADO permanentemente: ${id} (bovinos: ${bovineIds.length})`,
+        this.context,
+        { ranchId: id, bovinesDeleted: bovineIds.length, durationMs: Date.now() - startTime }
+      );
+    } catch (error) {
+      await t.rollback();
+      logger.error(`Error en borrado total del rancho ${id}`, this.context, { id }, ensureError(error));
+      throw error;
+    }
+  }
+
+  /**
+   * Quita la entrada de un rancho del `ranchAccess` (JSONB) de todos los
+   * usuarios que la tengan. Usado por el borrado total.
+   */
+  private async removeRanchFromAllUsersAccess(
+    ranchId: string,
+    transaction: Transaction
+  ): Promise<void> {
+    const rows = await sequelize.query<{ id: string }>(
+      `SELECT id FROM users
+         WHERE EXISTS (
+           SELECT 1 FROM jsonb_array_elements(ranch_access) AS access
+           WHERE access->>'ranchId' = :ranchId
+         )`,
+      { replacements: { ranchId }, type: QueryTypes.SELECT, transaction }
+    );
+
+    for (const { id } of rows) {
+      const user = await User.findByPk(id, { transaction });
+      if (!user) continue;
+      const access = (user.ranchAccess || []) as NonNullable<User['ranchAccess']>;
+      const updated = access.filter((a) => a.ranchId !== ranchId);
+      if (updated.length !== access.length) {
+        await user.update({ ranchAccess: updated }, { transaction });
+      }
     }
   }
 
@@ -402,6 +539,9 @@ export class RanchCoreService {
         limit,
         offset,
         order: [['name', 'ASC']],
+        // includeDeleted (solo SUPER_ADMIN): trae también los soft-deleted,
+        // que el frontend marca como "desactivado" por su deletedAt.
+        paranoid: !filters.includeDeleted,
       });
 
       logger.debug(`Ranchos listados`, this.context, { count, filters });

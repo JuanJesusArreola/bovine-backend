@@ -14,8 +14,14 @@ router.use(authenticateToken);
 router.post('/', authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN), validateRanch('createRanch'), ranchCoreController.createRanch);
 router.get('/', ranchCoreController.listRanches);
 router.get('/:id', validateId('id'), ranchCoreController.getRanchById);
-router.put('/:id', validateId('id'), validateRanch('updateRanch'), ranchCoreController.updateRanch);
+router.put('/:id', authorizeRoles(UserRole.OWNER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN), validateId('id'), validateRanch('updateRanch'), ranchCoreController.updateRanch);
 router.delete('/:id', authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN), validateId('id'), ranchCoreController.deleteRanch);
+
+// Restaurar un rancho soft-deleted (solo SUPER_ADMIN).
+router.post('/:id/restore', authorizeRoles(UserRole.SUPER_ADMIN), validateId('id'), ranchCoreController.restoreRanch);
+
+// BORRADO TOTAL irreversible a nivel BD (solo SUPER_ADMIN).
+router.delete('/:id/permanent', authorizeRoles(UserRole.SUPER_ADMIN), validateId('id'), ranchCoreController.hardDeleteRanch);
 
 // Métricas
 router.get('/:id/occupancy', validateId('id'), ranchCoreController.getOccupancyRate);

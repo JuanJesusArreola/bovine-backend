@@ -20,7 +20,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { logMessage, LogLevel } from '../middleware/logging';
-import { UserRole } from '../models/User';
+import { UserRole, Specialization } from '../models/User';
 
 // ============================================================================
 // TIPOS E INTERFACES
@@ -280,6 +280,45 @@ const isValidUUID = (fieldName: string): FieldValidator => (value) => {
     return { isValid: true, sanitizedValue: sanitized };
 };
 
+/**
+ * Validación condicional de información profesional.
+ * Se adjunta al campo `role` (que siempre se valida cuando viene un rol) y mira
+ * `allData.professionalInfo`. Si el rol es VETERINARIAN, exige:
+ *   - al menos 1 especialidad válida (enum Specialization)
+ *   - cédula profesional: una licencia con licenseNumber + issuingAuthority
+ * Para otros roles no exige nada.
+ */
+const requiresVetProfessionalInfo = (fieldName: string): FieldValidator => (value, allData) => {
+    if (value !== UserRole.VETERINARIAN) return { isValid: true };
+
+    const pro = allData?.professionalInfo;
+    const fail = (message: string, code: string): FieldValidationResult => ({
+        isValid: false,
+        error: { field: 'professionalInfo', value: undefined, message, code }
+    });
+
+    if (!pro || typeof pro !== 'object') {
+        return fail('Un veterinario requiere información profesional (especialidad y cédula)', 'VET_PROFESSIONAL_REQUIRED');
+    }
+
+    const specs = pro.specializations;
+    if (!Array.isArray(specs) || specs.length === 0) {
+        return fail('Debe indicar al menos una especialidad para el veterinario', 'VET_SPECIALIZATION_REQUIRED');
+    }
+    const validSpecs = Object.values(Specialization);
+    const invalid = specs.filter((s: any) => !validSpecs.includes(s));
+    if (invalid.length > 0) {
+        return fail(`Especialidad(es) inválida(s): ${invalid.join(', ')}`, 'VET_SPECIALIZATION_INVALID');
+    }
+
+    const license = Array.isArray(pro.licenses) ? pro.licenses[0] : undefined;
+    if (!license?.licenseNumber || !license?.issuingAuthority) {
+        return fail('Un veterinario requiere cédula profesional (número y autoridad emisora)', 'VET_LICENSE_REQUIRED');
+    }
+
+    return { isValid: true };
+};
+
 // ============================================================================
 // ESQUEMAS DE VALIDACIÓN
 // ============================================================================
@@ -351,6 +390,7 @@ export const AdminSchemas = {
             source: 'body' as const,
             validators: [
                 isValidRole('role'),
+                requiresVetProfessionalInfo('role'),
             ]
         },
         ranchId: {

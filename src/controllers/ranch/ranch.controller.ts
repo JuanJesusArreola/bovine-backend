@@ -14,6 +14,8 @@ export class RanchCoreController {
     this.createRanch = this.createRanch.bind(this);
     this.updateRanch = this.updateRanch.bind(this);
     this.deleteRanch = this.deleteRanch.bind(this);
+    this.restoreRanch = this.restoreRanch.bind(this);
+    this.hardDeleteRanch = this.hardDeleteRanch.bind(this);
     this.getRanchById = this.getRanchById.bind(this);
     this.listRanches = this.listRanches.bind(this);
     this.getOccupancyRate = this.getOccupancyRate.bind(this);
@@ -113,11 +115,15 @@ export class RanchCoreController {
       }
 
       const { id } = req.params;
+      const actor = {
+        role: req.userRole!,
+        ranchIds: req.user?.ranchAccess?.filter(a => a.isActive).map(a => a.ranchId) || [],
+      };
       const ranch = await ranchCoreService.updateRanch({
         id,
         ...req.body,
         updatedBy: userId,
-      });
+      }, actor);
 
       res.json({
         success: true,
@@ -143,11 +149,53 @@ export class RanchCoreController {
       }
 
       const { id } = req.params;
-      await ranchCoreService.deleteRanch(id, userId);
+      const actor = {
+        role: req.userRole!,
+        ranchIds: req.user?.ranchAccess?.filter(a => a.isActive).map(a => a.ranchId) || [],
+      };
+      await ranchCoreService.deleteRanch(id, userId, actor);
 
       res.json({ success: true, message: 'Rancho eliminado' });
     } catch (error) {
       logger.error('Error en deleteRanch', this.context, { params: req.params }, error as Error);
+      if (error instanceof RanchError) {
+        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+      } else {
+        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+      }
+    }
+  }
+
+  /**
+   * POST /api/ranch/:id/restore — reactiva un rancho soft-deleted (SUPER_ADMIN).
+   */
+  async restoreRanch(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const ranch = await ranchCoreService.restoreRanch(id);
+      res.json({ success: true, data: ranch, message: 'Rancho restaurado' });
+    } catch (error) {
+      logger.error('Error en restoreRanch', this.context, { params: req.params }, error as Error);
+      if (error instanceof RanchError) {
+        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+      } else {
+        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+      }
+    }
+  }
+
+  /**
+   * DELETE /api/ranch/:id/permanent — BORRADO TOTAL irreversible (SUPER_ADMIN).
+   * Cascada acotada: bovinos, ubicaciones, finanzas, producción, reproducción,
+   * snapshots, alertas y limpieza de ranchAccess.
+   */
+  async hardDeleteRanch(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      await ranchCoreService.hardDeleteRanch(id);
+      res.json({ success: true, message: 'Rancho eliminado permanentemente' });
+    } catch (error) {
+      logger.error('Error en hardDeleteRanch', this.context, { params: req.params }, error as Error);
       if (error instanceof RanchError) {
         res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
       } else {
@@ -195,6 +243,9 @@ export class RanchCoreController {
         filters.ranchIds = req.user?.ranchAccess
           ?.filter(a => a.isActive)
           .map(a => a.ranchId) || [];
+      } else if (req.query.includeDeleted === 'true') {
+        // Solo SUPER_ADMIN puede ver los ranchos desactivados (soft-deleted).
+        filters.includeDeleted = true;
       }
 
       const result = await ranchCoreService.listRanches(filters);

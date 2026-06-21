@@ -290,7 +290,7 @@ class Database {
 
     // 2. Un usuario puede crear muchos eventos
     User.hasMany(Event, {
-      foreignKey: 'createdById',
+      foreignKey: 'createdBy',
       as: 'createdEvents',
       onDelete: 'SET NULL',
       onUpdate: 'CASCADE'
@@ -601,9 +601,17 @@ class Database {
       onUpdate: 'CASCADE'
     });
 
+    // 19b. Un evento puede pertenecer a una localización (campaña por ubicación)
+    Event.belongsTo(Location, {
+      foreignKey: 'locationId',
+      as: 'location',
+      onDelete: 'CASCADE',
+      onUpdate: 'CASCADE'
+    });
+
     // 20. Un evento es creado por un usuario
     Event.belongsTo(User, {
-      foreignKey: 'createdById',
+      foreignKey: 'createdBy',
       as: 'creator',
       onDelete: 'SET NULL',
       onUpdate: 'CASCADE'

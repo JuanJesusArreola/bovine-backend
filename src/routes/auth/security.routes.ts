@@ -17,7 +17,7 @@ router.use(authenticateToken);
 router.use(sanitizeInput);
 
 // ============================================================================
-// RUTAS DE EVENTOS DE SEGURIDAD (solo admin y super_admin)
+// RUTAS DE EVENTOS DE SEGURIDAD (solo SUPER_ADMIN)
 // ============================================================================
 
 /**
@@ -26,7 +26,7 @@ router.use(sanitizeInput);
  */
 router.get(
     '/events',
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER),
+    authorizeRoles(UserRole.SUPER_ADMIN),
     createRateLimit(EndpointType.REPORTS),
     securityController.listEvents.bind(securityController)
 );
@@ -37,7 +37,7 @@ router.get(
  */
 router.get(
     '/events/unresolved',
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER),
+    authorizeRoles(UserRole.SUPER_ADMIN),
     createRateLimit(EndpointType.REPORTS),
     securityController.getUnresolvedEvents.bind(securityController)
 );
@@ -48,7 +48,7 @@ router.get(
  */
 router.get(
     '/events/:id',
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER),
+    authorizeRoles(UserRole.SUPER_ADMIN),
     validateId('id'),
     createRateLimit(EndpointType.CATTLE_READ),
     securityController.getEventById.bind(securityController)
@@ -60,7 +60,7 @@ router.get(
  */
 router.post(
     '/events/resolve-batch',
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER),
+    authorizeRoles(UserRole.SUPER_ADMIN),
     createRateLimit(EndpointType.CATTLE_WRITE),
     securityController.resolveEvents.bind(securityController)
 );
@@ -71,7 +71,7 @@ router.post(
  */
 router.post(
     '/events/:id/resolve',
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER),
+    authorizeRoles(UserRole.SUPER_ADMIN),
     validateId('id'),
     createRateLimit(EndpointType.CATTLE_WRITE),
     securityController.resolveEvent.bind(securityController)
@@ -85,7 +85,7 @@ router.post(
  */
 router.get(
     '/stats',
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER),
+    authorizeRoles(UserRole.SUPER_ADMIN),
     createRateLimit(EndpointType.REPORTS),
     securityController.getStats.bind(securityController)
 );

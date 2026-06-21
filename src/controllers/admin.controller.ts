@@ -42,7 +42,7 @@ export class AdminController {
                 return;
             }
 
-            const { email, password, confirmPassword, firstName, lastName, phone, role, ranchId } = req.body;
+            const { email, password, confirmPassword, firstName, lastName, phone, role, ranchId, professionalInfo } = req.body;
 
             // ── Validar que el solicitante puede crear usuarios ──────────
             const allowedRoles = ROLE_CREATION_HIERARCHY[requestingRole];
@@ -92,6 +92,7 @@ export class AdminController {
                 phone,
                 role: targetRole,
                 ranchId,
+                professionalInfo,
                 createdBy: requestingUser.id,
                 ipAddress: req.ip,
                 userAgent: req.get('User-Agent')

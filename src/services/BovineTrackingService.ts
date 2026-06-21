@@ -25,6 +25,7 @@ import type { BovineGeoService } from './BovineGeoService';
 import type { EventService } from './EventService';
 import type { NotificationService, CreateNotificationDTO } from './NotificationService';
 import Location, { LocationType, GeofenceType, LocationStatus, Coordinates, AlertTrigger } from '../models/Location';
+import LocationMonitoring, { DeviceStatus as IoTDeviceStatus } from '../models/LocationMonitoring';
 import { AccessLevel } from '../models/LocationAccess';
 import { haversineDistance, toRadians } from '../utils/geoUtils';
 import { NotificationType, NotificationPriority } from '../models/Notification';
@@ -1346,6 +1347,39 @@ export class BovineTrackingService {
  * @param ranchId - ID del rancho
  * @param days - Período en días (por defecto 30)
  */
+    /**
+     * KPIs del mapa interactivo (/maps). Devuelve EXACTAMENTE lo que consume el
+     * frontend (GeoStats), calculado desde las fuentes reales:
+     *  - trackedBovines : bovinos con seguimiento GPS (BovineTracking).
+     *  - activeLocations: localizaciones activas del rancho.
+     *  - onlineDevices  : dispositivos IoT (LocationMonitoring) ONLINE.
+     *  - geofenceAlerts : monitoreos con alertas de geocerca sin resolver.
+     */
+    async getGeoStats(ranchId: string): Promise<{
+        trackedBovines: number;
+        activeLocations: number;
+        onlineDevices: number;
+        geofenceAlerts: number;
+    }> {
+        const [trackedBovines, activeLocations, onlineDevices, geofenceAlerts] = await Promise.all([
+            BovineTracking.count({
+                distinct: true,
+                col: 'bovine_id',
+                include: [{ model: Bovine, as: 'bovine', attributes: [], required: true, where: { ranchId } }],
+            }),
+            Location.count({ where: { ranchId, status: LocationStatus.ACTIVE } }),
+            LocationMonitoring.count({
+                where: { deviceStatus: IoTDeviceStatus.ONLINE },
+                include: [{ model: Location, as: 'location', attributes: [], required: true, where: { ranchId } }],
+            }),
+            LocationMonitoring.count({
+                where: { unresolvedAlertCount: { [Op.gt]: 0 } },
+                include: [{ model: Location, as: 'location', attributes: [], required: true, where: { ranchId } }],
+            }),
+        ]);
+        return { trackedBovines, activeLocations, onlineDevices, geofenceAlerts };
+    }
+
     async getGeoStatistics(ranchId: string, days: number = 30): Promise<{
         totalLocations: number;
         averageAccuracy: number;

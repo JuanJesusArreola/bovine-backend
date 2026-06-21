@@ -32,6 +32,13 @@ export class RanchNotFoundError extends RanchError {
   }
 }
 
+export class RanchAccessDeniedError extends RanchError {
+  constructor(ranchId: string) {
+    super(`No tienes acceso al rancho ${ranchId}`, 'RANCH_ACCESS_DENIED', 403);
+    this.name = 'RanchAccessDeniedError';
+  }
+}
+
 export class RanchValidationError extends RanchError {
   constructor(message: string) {
     super(message, 'RANCH_VALIDATION_ERROR', 400);

@@ -23,14 +23,21 @@ import Event, {
     NotificationConfig
 } from '../models/Event';
 import Bovine, { LocationData } from '../models/Bovine';
+import Location from '../models/Location';
 import Health from '../models/Health';
+
+// Margen antes de considerar un evento "atrasado": 5 horas después de su fecha
+// programada (un atraso de minutos/horas no debe marcarse de inmediato).
+const OVERDUE_GRACE_MS = 5 * 60 * 60 * 1000;
 
 // ============================================================================
 // INTERFACES PÚBLICAS
 // ============================================================================
 
 export interface CreateEventDTO {
-    bovineId: string;
+    // Uno de los dos: bovineId (evento individual) o locationId (campaña).
+    bovineId?: string;
+    locationId?: string;
     eventType: EventType;
     title: string;
     description?: string;
@@ -39,6 +46,7 @@ export interface CreateEventDTO {
     expectedLocation?: LocationData;
     assignedTo?: string;
     veterinarianId?: string;
+    assignedToIds?: string[];
     estimatedCost?: number;
     currency?: string;
     expectedData?: ExpectedEventData;
@@ -67,13 +75,18 @@ export interface EventFilters {
     assignedTo?: string;
     veterinarianId?: string;
     isActive?: boolean;
+    // Visibilidad por asignación (lo fija el controlador desde el usuario).
+    viewerId?: string;
+    viewerIsManager?: boolean;
 }
 
 export interface EventResponse {
     id: string;
-    bovineId: string;
+    bovineId?: string;
     bovineName?: string;
     bovineEarTag?: string;
+    locationId?: string;
+    locationName?: string;
     eventType: EventType;
     eventTypeLabel: string;
     title: string;
@@ -85,6 +98,9 @@ export interface EventResponse {
     scheduledDate: Date;
     completedDate?: Date;
     healthRecordId?: string;
+    assignedTo?: string;
+    veterinarianId?: string;
+    assignedToIds?: string[];
     daysUntil: number;
     isOverdue: boolean;
     requiresVeterinarian: boolean;
@@ -111,14 +127,28 @@ export class EventService {
         const startTime = Date.now();
 
         try {
-            // 1. Validar que el bovino existe
-            const bovine = await Bovine.findByPk(data.bovineId, {
-                attributes: ['id', 'ranchId'],
-                transaction
-            });
-
-            if (!bovine) {
-                throw new EventNotFoundError(`Bovino con ID ${data.bovineId} no encontrado`);
+            // 1. Validar destino: debe venir bovineId (individual) o locationId
+            //    (campaña), y la entidad referenciada debe existir.
+            if (!data.bovineId && !data.locationId) {
+                throw new EventValidationError('Debe indicar un bovino o una localización para el evento');
+            }
+            if (data.bovineId) {
+                const bovine = await Bovine.findByPk(data.bovineId, {
+                    attributes: ['id', 'ranchId'],
+                    transaction: t
+                });
+                if (!bovine) {
+                    throw new EventNotFoundError(`Bovino con ID ${data.bovineId} no encontrado`);
+                }
+            }
+            if (data.locationId) {
+                const location = await Location.findByPk(data.locationId, {
+                    attributes: ['id'],
+                    transaction: t
+                });
+                if (!location) {
+                    throw new EventNotFoundError(`Localización con ID ${data.locationId} no encontrada`);
+                }
             }
 
             // 2. Validar fecha programada
@@ -130,6 +160,7 @@ export class EventService {
             // 4. Crear evento
             const event = await Event.create({
                 bovineId: data.bovineId,
+                locationId: data.locationId,
                 eventType: data.eventType,
                 title: data.title,
                 description: data.description,
@@ -139,6 +170,7 @@ export class EventService {
                 expectedLocation: data.expectedLocation,
                 assignedTo: data.assignedTo,
                 veterinarianId: data.veterinarianId,
+                assignedToIds: data.assignedToIds ?? [],
                 estimatedCost: data.estimatedCost,
                 currency: data.currency,
                 expectedData: data.expectedData,
@@ -179,12 +211,20 @@ export class EventService {
             }
             logger.error(`Error creando evento`, this.context, { data }, ensureError(error));
 
+            // Respetar errores ya tipados (mantienen su mensaje + statusCode).
             if (error instanceof EventError) throw error;
+            // Las validaciones del modelo (Sequelize) traen el motivo real:
+            // exponerlo como 400 en vez de un 500 genérico que oculta la causa.
+            const e = ensureError(error);
+            if ((e as any).name === 'SequelizeValidationError') {
+                const msg = (e as any).errors?.[0]?.message || e.message;
+                throw new EventValidationError(msg);
+            }
             throw new EventError(
                 'Error al crear el evento',
                 'CREATE_ERROR',
                 500,
-                ensureError(error)
+                e
             );
         }
     }
@@ -246,11 +286,10 @@ export class EventService {
     async getEventById(id: string): Promise<Event | null> {
         try {
             const event = await Event.findByPk(id, {
-                include: [{
-                    model: Bovine,
-                    as: 'bovine',
-                    attributes: ['id', 'earTag', 'name']
-                }]
+                include: [
+                    { model: Bovine, as: 'bovine', attributes: ['id', 'earTag', 'name'] },
+                    { model: Location, as: 'location', attributes: ['id', 'name'] }
+                ]
             });
 
             return event;
@@ -277,11 +316,14 @@ export class EventService {
                 limit: pagination.limit,
                 offset,
                 order: [['scheduledDate', 'ASC']],
-                include: [{
-                    model: Bovine,
-                    as: 'bovine',
-                    attributes: ['id', 'earTag', 'name']
-                }]
+                // subQuery:false → el filtro por $bovine.ranchId$ / $location.ranchId$
+                // (columnas de los JOIN) se aplica en la misma consulta con LIMIT.
+                // Son belongsTo (1:1) → no hay multiplicación de filas.
+                subQuery: false,
+                include: [
+                    { model: Bovine, as: 'bovine', attributes: ['id', 'earTag', 'name'] },
+                    { model: Location, as: 'location', attributes: ['id', 'name'] }
+                ]
             });
 
             logger.debug(`Eventos listados`, this.context, {
@@ -358,14 +400,18 @@ export class EventService {
                 where: {
                     scheduledDate: { [Op.between]: [startDate, endDate] },
                     status: { [Op.in]: [EventStatus.SCHEDULED, EventStatus.POSTPONED] },
-                    isActive: true
+                    isActive: true,
+                    // Rancho por bovino (individual) o localización (campaña).
+                    [Op.or]: [
+                        { '$bovine.ranch_id$': ranchId },
+                        { '$location.ranch_id$': ranchId },
+                    ],
                 },
-                include: [{
-                    model: Bovine,
-                    as: 'bovine',
-                    where: { ranchId },
-                    attributes: ['id', 'earTag', 'name']
-                }],
+                subQuery: false,
+                include: [
+                    { model: Bovine, as: 'bovine', attributes: ['id', 'earTag', 'name'] },
+                    { model: Location, as: 'location', attributes: ['id', 'name'] },
+                ],
                 order: [['scheduledDate', 'ASC']]
             });
 
@@ -388,20 +434,24 @@ export class EventService {
      */
     async getOverdueEvents(ranchId: string): Promise<Event[]> {
         try {
-            const now = new Date();
+            // Atrasado = más de 5h después de la fecha programada.
+            const cutoff = new Date(Date.now() - OVERDUE_GRACE_MS);
 
             const events = await Event.findAll({
                 where: {
-                    scheduledDate: { [Op.lt]: now },
+                    scheduledDate: { [Op.lt]: cutoff },
                     status: { [Op.in]: [EventStatus.SCHEDULED, EventStatus.POSTPONED] },
-                    isActive: true
+                    isActive: true,
+                    [Op.or]: [
+                        { '$bovine.ranch_id$': ranchId },
+                        { '$location.ranch_id$': ranchId },
+                    ],
                 },
-                include: [{
-                    model: Bovine,
-                    as: 'bovine',
-                    where: { ranchId },
-                    attributes: ['id', 'earTag', 'name']
-                }],
+                subQuery: false,
+                include: [
+                    { model: Bovine, as: 'bovine', attributes: ['id', 'earTag', 'name'] },
+                    { model: Location, as: 'location', attributes: ['id', 'name'] },
+                ],
                 order: [['scheduledDate', 'ASC']]
             });
 
@@ -499,9 +549,11 @@ export class EventService {
     }
 
     /**
-     * Completa un evento y lo vincula con un registro de salud
+     * Completa un evento. `healthRecordId` es OPCIONAL: los eventos clínicos
+     * individuales pueden enlazar su registro de salud; campañas y eventos no
+     * clínicos se dan por finalizados sin uno.
      */
-    async completeEvent(id: string, healthRecordId: string, userId: string): Promise<Event> {
+    async completeEvent(id: string, userId: string, healthRecordId?: string): Promise<Event> {
         const transaction = await sequelize.transaction();
         const startTime = Date.now();
 
@@ -511,17 +563,19 @@ export class EventService {
                 throw new EventNotFoundError(`Evento con ID ${id} no encontrado`);
             }
 
-            // Verificar que el registro de salud existe
-            const healthRecord = await Health.findByPk(healthRecordId, { transaction });
-            if (!healthRecord) {
-                throw new EventValidationError(
-                    `Registro de salud con ID ${healthRecordId} no encontrado`
-                );
+            // Si se provee, verificar que el registro de salud existe.
+            if (healthRecordId) {
+                const healthRecord = await Health.findByPk(healthRecordId, { transaction });
+                if (!healthRecord) {
+                    throw new EventValidationError(
+                        `Registro de salud con ID ${healthRecordId} no encontrado`
+                    );
+                }
             }
 
             await event.update({
                 status: EventStatus.COMPLETED,
-                healthRecordId,
+                ...(healthRecordId ? { healthRecordId } : {}),
                 endDate: new Date()
             }, { transaction });
 
@@ -648,6 +702,53 @@ export class EventService {
         }
     }
 
+    /**
+     * Reporta un atraso / no realización SIN reprogramar. El evento conserva su
+     * estado y fecha; se deja constancia del motivo y quién reportó en
+     * planningNotes + metadata.delayReports. Reagendar queda para postponeEvent
+     * (solo gestores).
+     */
+    async reportDelay(id: string, reason: string, userId: string): Promise<Event> {
+        const transaction = await sequelize.transaction();
+        const startTime = Date.now();
+
+        try {
+            const event = await Event.findByPk(id, { transaction });
+            if (!event) {
+                throw new EventNotFoundError(`Evento con ID ${id} no encontrado`);
+            }
+            if (event.status === EventStatus.COMPLETED || event.status === EventStatus.CANCELLED) {
+                throw new EventValidationError('No se puede reportar atraso en un evento completado o cancelado');
+            }
+
+            const prevMeta = (event.metadata && typeof event.metadata === 'object') ? event.metadata : {};
+            const delayReports = Array.isArray(prevMeta.delayReports) ? prevMeta.delayReports : [];
+            delayReports.push({ reason, reportedBy: userId, reportedAt: new Date().toISOString() });
+
+            await event.update({
+                metadata: { ...prevMeta, delayReports },
+                planningNotes: event.planningNotes
+                    ? `${event.planningNotes}\nAtraso reportado: ${reason}`
+                    : `Atraso reportado: ${reason}`
+            }, { transaction });
+
+            await transaction.commit();
+
+            logger.info(`Atraso reportado en evento: ${id}`, this.context, {
+                eventId: id, reason, userId, durationMs: Date.now() - startTime
+            });
+
+            return event;
+
+        } catch (error) {
+            await transaction.rollback();
+            logger.error(`Error reportando atraso del evento ${id}`, this.context, { id, reason, userId }, ensureError(error));
+
+            if (error instanceof EventError) throw error;
+            throw new EventError('Error al reportar el atraso del evento', 'REPORT_DELAY_ERROR', 500, ensureError(error));
+        }
+    }
+
     // ==========================================================================
     // MÉTODOS DE UTILIDAD
     // ==========================================================================
@@ -667,6 +768,8 @@ export class EventService {
             bovineId: event.bovineId,
             bovineName: (event as any).bovine?.name,
             bovineEarTag: (event as any).bovine?.earTag,
+            locationId: event.locationId,
+            locationName: (event as any).location?.name,
             eventType: event.eventType,
             eventTypeLabel: this.getEventTypeLabel(event.eventType),
             title: event.title,
@@ -678,8 +781,14 @@ export class EventService {
             scheduledDate: event.scheduledDate,
             completedDate: event.endDate,
             healthRecordId: event.healthRecordId,
+            assignedTo: event.assignedTo,
+            veterinarianId: event.veterinarianId,
+            assignedToIds: event.assignedToIds ?? [],
             daysUntil,
-            isOverdue: daysUntil < 0 && event.status === EventStatus.SCHEDULED,
+            // Atrasado: más de 5h tras la fecha programada y aún sin ejecutar.
+            isOverdue:
+                (now.getTime() - new Date(event.scheduledDate).getTime()) > OVERDUE_GRACE_MS
+                && (event.status === EventStatus.SCHEDULED || event.status === EventStatus.POSTPONED),
             requiresVeterinarian: event.requiresVeterinarian,
             createdAt: event.createdAt
         };
@@ -721,8 +830,37 @@ export class EventService {
             where.veterinarianId = filters.veterinarianId;
         }
 
+        // Combinamos múltiples grupos OR con Op.and (no se puede repetir Op.or
+        // como clave del objeto). Cada grupo es una condición independiente.
+        const andGroups: any[] = [];
+
         if (filters.ranchId) {
-            // Requiere include con Bovine
+            // Un evento pertenece a un rancho a través de su bovino (individual)
+            // o de su localización (campaña): cualquiera de los dos joins.
+            andGroups.push({
+                [Op.or]: [
+                    { '$bovine.ranch_id$': filters.ranchId },
+                    { '$location.ranch_id$': filters.ranchId },
+                ],
+            });
+        }
+
+        // Visibilidad por asignación: un no-gestor solo ve eventos ABIERTOS
+        // (sin asignados), aquellos donde es asignado, o los que él creó.
+        // Los gestores ven todo (no se aplica este filtro).
+        if (filters.viewerId && !filters.viewerIsManager) {
+            andGroups.push({
+                [Op.or]: [
+                    { assignedToIds: { [Op.is]: null } },
+                    { assignedToIds: { [Op.eq]: [] } },
+                    { assignedToIds: { [Op.contains]: [filters.viewerId] } },
+                    { createdBy: filters.viewerId },
+                ],
+            });
+        }
+
+        if (andGroups.length) {
+            where[Op.and] = andGroups;
         }
 
         return where;
@@ -731,36 +869,31 @@ export class EventService {
     /**
      * Valida fecha programada
      */
-    private validateScheduledDate(date: Date): void {
-        const now = new Date();
-        if (date < now) {
-            throw new EventValidationError(
-                'La fecha programada debe ser futura'
-            );
+    private validateScheduledDate(date: Date | string): void {
+        // El controlador pasa la fecha como string (datetime-local → ISO). Hay
+        // que parsearla; comparar string < Date daba NaN y nunca validaba.
+        const d = date instanceof Date ? date : new Date(date);
+        if (isNaN(d.getTime())) {
+            throw new EventValidationError('La fecha programada no es válida');
+        }
+        if (d < new Date()) {
+            throw new EventValidationError('La fecha programada debe ser futura');
         }
     }
 
     /**
-     * Valida datos según tipo de evento
+     * Valida datos según tipo de evento.
+     *
+     * Un evento es PLANIFICACIÓN: agenda una acción futura. Los detalles de
+     * ejecución (lote de vacuna, veterinario que la aplica, dosis, etc.) se
+     * capturan al EJECUTAR el evento (start/complete) o en el registro de Salud
+     * asociado — no al agendarlo. Por eso aquí NO exigimos `expectedData` ni
+     * `veterinarianId`: hacerlo impedía crear campañas y eventos de vacunación/
+     * tratamiento desde la UI. Si en el futuro se requieren validaciones
+     * suaves por tipo, van aquí.
      */
-    private validateEventData(data: CreateEventDTO): void {
-        switch (data.eventType) {
-            case EventType.VACCINATION:
-                if (!data.expectedData) {
-                    throw new EventValidationError(
-                        'Los eventos de vacunación requieren datos de vacuna'
-                    );
-                }
-                break;
-            case EventType.TREATMENT:
-                if (!data.veterinarianId) {
-                    throw new EventValidationError(
-                        'Los tratamientos requieren un veterinario asignado'
-                    );
-                }
-                break;
-            // ... otras validaciones
-        }
+    private validateEventData(_data: CreateEventDTO): void {
+        // Sin validaciones bloqueantes en la fase de planificación.
     }
 
     /**

@@ -264,6 +264,7 @@ export class UserController {
                     verificationScore: user.getVerificationScore(),
                     lastLoginAt: user.lastLoginAt,
                     createdAt: user.createdAt,
+                    professionalInfo: user.professionalInfo,
                     ranchAccess: user.ranchAccess,
                     permissions: user.permissions
                 }
@@ -298,7 +299,8 @@ export class UserController {
                 emailVerified,
                 permissions,
                 ranchId,
-                replaceRanchAccess
+                replaceRanchAccess,
+                professionalInfo
             } = req.body;
 
             // Ámbito de ranchos del OWNER (para acotar el modo "mover"). Para
@@ -378,6 +380,7 @@ export class UserController {
                     permissions,
                     ranchId,
                     replaceRanchAccess,
+                    professionalInfo,
                     ownerRanchScope
                 },
                 userId

@@ -2,7 +2,16 @@
 import { Request, Response } from 'express';
 import { eventService, EventFilters } from '../services/EventService';
 import { EventError } from '../utils/EventErrors';
+import { UserRole } from '../models/User';
 import logger from '../utils/logger';
+
+// Gestores con control total sobre eventos.
+const EVENT_MANAGER_ROLES: UserRole[] = [
+    UserRole.MANAGER,
+    UserRole.RANCH_MANAGER,
+    UserRole.OWNER,
+    UserRole.SUPER_ADMIN,
+];
 
 export class EventController {
     private readonly context = 'EventController';
@@ -20,6 +29,39 @@ export class EventController {
         this.completeEvent = this.completeEvent.bind(this);
         this.cancelEvent = this.cancelEvent.bind(this);
         this.postponeEvent = this.postponeEvent.bind(this);
+        this.reportDelay = this.reportDelay.bind(this);
+    }
+
+    /**
+     * Autoriza una acción de EJECUCIÓN sobre un evento (start/complete/cancel/
+     * report-delay). Permitido a: un gestor (MANAGER+), o el usuario asignado
+     * (assignedTo) o el veterinario asignado (veterinarianId) del evento.
+     * Devuelve el evento si está autorizado; si no, responde 403/404 y null.
+     */
+    private async authorizeEventAction(req: Request, res: Response, id: string): Promise<any | null> {
+        const event = await eventService.getEventById(id);
+        if (!event) {
+            res.status(404).json({ success: false, error: 'Evento no encontrado' });
+            return null;
+        }
+        const role = req.userRole as UserRole;
+        const uid = req.user?.id;
+        const isManager = EVENT_MANAGER_ROLES.includes(role);
+        const assignedIds: string[] = Array.isArray(event.assignedToIds) ? event.assignedToIds : [];
+        const isAssignee = !!uid && (
+            event.assignedTo === uid ||
+            event.veterinarianId === uid ||
+            assignedIds.includes(uid)
+        );
+        if (!isManager && !isAssignee) {
+            res.status(403).json({
+                success: false,
+                error: 'Solo el responsable asignado o un gestor pueden ejecutar esta acción sobre el evento',
+                code: 'EVENT_ACTION_FORBIDDEN'
+            });
+            return null;
+        }
+        return event;
     }
 
     /**
@@ -46,6 +88,10 @@ export class EventController {
                 assignedTo: req.query.assignedTo as string,
                 veterinarianId: req.query.veterinarianId as string,
                 isActive: req.query.isActive === 'true' ? true : req.query.isActive === 'false' ? false : undefined,
+                // Visibilidad: un no-gestor solo ve eventos abiertos, los suyos
+                // (asignado) o los que creó. Los gestores ven todo el rancho.
+                viewerId: userId,
+                viewerIsManager: EVENT_MANAGER_ROLES.includes(req.userRole as UserRole),
             };
 
             const pagination = {
@@ -303,6 +349,7 @@ export class EventController {
             }
 
             const { id } = req.params;
+            if (!(await this.authorizeEventAction(req, res, id))) return;
             const event = await eventService.startEvent(id, userId);
             const data = eventService.formatEventResponse(event);
             res.json({ success: true, data, message: 'Evento iniciado' });
@@ -329,13 +376,13 @@ export class EventController {
             }
 
             const { id } = req.params;
+            if (!(await this.authorizeEventAction(req, res, id))) return;
+            // healthRecordId es OPCIONAL: los eventos clínicos individuales pueden
+            // enlazar su registro de salud, pero campañas y eventos no clínicos
+            // se pueden dar por finalizados sin uno.
             const { healthRecordId } = req.body;
-            if (!healthRecordId) {
-                res.status(400).json({ success: false, error: 'healthRecordId es requerido' });
-                return;
-            }
 
-            const event = await eventService.completeEvent(id, healthRecordId, userId);
+            const event = await eventService.completeEvent(id, userId, healthRecordId);
             const data = eventService.formatEventResponse(event);
             res.json({ success: true, data, message: 'Evento completado' });
         } catch (error) {
@@ -366,6 +413,7 @@ export class EventController {
                 res.status(400).json({ success: false, error: 'reason es requerido' });
                 return;
             }
+            if (!(await this.authorizeEventAction(req, res, id))) return;
 
             const event = await eventService.cancelEvent(id, reason, userId);
             const data = eventService.formatEventResponse(event);
@@ -408,6 +456,41 @@ export class EventController {
             res.json({ success: true, data, message: 'Evento pospuesto' });
         } catch (error) {
             logger.error('Error en postponeEvent', this.context, { id: req.params.id, body: req.body }, error as Error);
+            if (error instanceof EventError) {
+                res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+            } else {
+                res.status(500).json({ success: false, error: 'Error interno del servidor' });
+            }
+        }
+    }
+
+    /**
+     * POST /api/events/:id/report-delay
+     * El responsable (o un gestor) informa que el evento se atrasó o no se pudo
+     * llevar a cabo, SIN reprogramarlo (eso queda para los gestores vía postpone).
+     * El evento conserva su estado; se registra el motivo y quién lo reportó.
+     */
+    async reportDelay(req: Request, res: Response): Promise<void> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                res.status(401).json({ success: false, error: 'Usuario no autenticado' });
+                return;
+            }
+
+            const { id } = req.params;
+            const { reason } = req.body;
+            if (!reason) {
+                res.status(400).json({ success: false, error: 'reason es requerido' });
+                return;
+            }
+            if (!(await this.authorizeEventAction(req, res, id))) return;
+
+            const event = await eventService.reportDelay(id, reason, userId);
+            const data = eventService.formatEventResponse(event);
+            res.json({ success: true, data, message: 'Atraso reportado. Un gestor podrá reagendar el evento.' });
+        } catch (error) {
+            logger.error('Error en reportDelay', this.context, { id: req.params.id, body: req.body }, error as Error);
             if (error instanceof EventError) {
                 res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
             } else {

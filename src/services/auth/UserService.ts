@@ -39,6 +39,10 @@ export interface CreateUserDTO {
     phone?: string;
     role?: UserRole;
     ranchId?: string;
+    // Información profesional. Obligatoria para VETERINARIAN (especialidad +
+    // cédula); ignorada para otros roles. La valida admin.validators + el guard
+    // de este servicio antes de persistir.
+    professionalInfo?: Partial<ProfessionalInfo>;
     createdBy?: string;
     ipAddress?: string;
     userAgent?: string;
@@ -374,6 +378,23 @@ export class UserService {
             const role = data.role || UserRole.VIEWER;
             const defaultPermissions = this.getDefaultPermissionsByRole(role);
 
+            // ── Info profesional obligatoria para VETERINARIAN ───────────
+            // El modelo (hook beforeSave) exige professionalInfo para roles
+            // profesionales. Validamos aquí para devolver un 400 claro (vía
+            // ValidationError) en vez del Error genérico del hook (500), y
+            // exigimos especialidad + cédula profesional.
+            if (role === UserRole.VETERINARIAN) {
+                const pro = data.professionalInfo;
+                const specs = pro?.specializations;
+                const license = pro?.licenses?.[0];
+                if (!pro || !Array.isArray(specs) || specs.length === 0) {
+                    throw new ValidationError('Un veterinario requiere al menos una especialidad');
+                }
+                if (!license?.licenseNumber || !license?.issuingAuthority) {
+                    throw new ValidationError('Un veterinario requiere cédula profesional (número y autoridad emisora)');
+                }
+            }
+
             // 🔥 GENERAR userCode EXPLÍCITAMENTE (evitar problemas con hook)
             const timestamp = Date.now().toString().slice(-6);
             const rolePrefix = role.substring(0, 2).toUpperCase();
@@ -479,6 +500,9 @@ export class UserService {
                         country: 'México'
                     }
                 },
+                // Solo se persiste si viene (obligatorio para VET, opcional/omitido
+                // para el resto). El hook del modelo exige su presencia en vets.
+                ...(data.professionalInfo ? { professionalInfo: data.professionalInfo } : {}),
                 systemSettings,      // ← PASADO EXPLÍCITAMENTE
                 securityInfo,        // ← PASADO EXPLÍCITAMENTE
                 complianceInfo,      // ← PASADO EXPLÍCITAMENTE
@@ -807,6 +831,25 @@ export class UserService {
 
             if (data.permissions) {
                 updateData.permissions = { ...user.permissions, ...data.permissions };
+            }
+
+            // ── Info profesional obligatoria si el rol RESULTANTE es vet ──
+            // Cubre la promoción (p. ej. VIEWER→VETERINARIAN): exige especialidad
+            // + cédula, tomando lo que ya tenga el usuario o lo que venga en la
+            // edición. Devuelve 400 claro en vez del Error genérico del hook.
+            // Si el rol resultante NO es vet (p. ej. VET→WORKER), no valida nada
+            // y el professionalInfo previo queda latente, inofensivo.
+            const effectiveRole = (data.role as UserRole) || user.role;
+            if (effectiveRole === UserRole.VETERINARIAN) {
+                const pro = updateData.professionalInfo ?? user.professionalInfo;
+                const specs = pro?.specializations;
+                const license = pro?.licenses?.[0];
+                if (!pro || !Array.isArray(specs) || specs.length === 0) {
+                    throw new ValidationError('Un veterinario requiere al menos una especialidad');
+                }
+                if (!license?.licenseNumber || !license?.issuingAuthority) {
+                    throw new ValidationError('Un veterinario requiere cédula profesional (número y autoridad emisora)');
+                }
             }
 
             updateData.updatedBy = updatedBy;

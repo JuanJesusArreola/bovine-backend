@@ -24,12 +24,12 @@ router.get('/distance/:id1/:id2', validateId('id1'), validateId('id2'), location
 // Rutas de escritura (requieren permisos de administración o gestión de ranchos)
 router.post(
   '/',
-  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.RANCH_MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.RANCH_MANAGER),
   locationController.createLocation
 );
 router.put(
   '/:id',
-  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.RANCH_MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.RANCH_MANAGER),
   validateId('id'),
   locationController.updateLocation
 );
