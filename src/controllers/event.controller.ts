@@ -88,6 +88,7 @@ export class EventController {
                 assignedTo: req.query.assignedTo as string,
                 veterinarianId: req.query.veterinarianId as string,
                 isActive: req.query.isActive === 'true' ? true : req.query.isActive === 'false' ? false : undefined,
+                overdue: req.query.overdue === 'true' ? true : undefined,
                 // Visibilidad: un no-gestor solo ve eventos abiertos, los suyos
                 // (asignado) o los que creó. Los gestores ven todo el rancho.
                 viewerId: userId,

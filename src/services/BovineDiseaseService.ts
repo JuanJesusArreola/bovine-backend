@@ -255,20 +255,21 @@ export class BovineDiseaseService {
         }
       }
 
-      // healthStatus del bovino: el más grave entre el previo y el nuevo.
-      // SICK / DECEASED tienen prioridad sobre RECOVERING; DECEASED es terminal.
-      const HEALTH_PRIORITY: Partial<Record<HealthStatus, number>> = {
-        [HealthStatus.DECEASED]:   5,
-        [HealthStatus.SICK]:       4,
-        [HealthStatus.QUARANTINE]: 3,
-        [HealthStatus.RECOVERING]: 2,
-        [HealthStatus.UNKNOWN]:    1,
-        [HealthStatus.HEALTHY]:    0,
-      };
-      const prevHealth = snapshot?.healthStatus;
+      // "Respetar el estado del registro": si el bovino YA está en un estado
+      // clínico activo (lo fijó el registro de salud, p. ej. QUARANTINE por una
+      // enfermedad contagiosa), NO lo sobrescribimos con el estado derivado del
+      // caso (que tiende a SICK). Solo asignamos el estado del caso cuando el
+      // bovino no tenía estado clínico (HEALTHY/UNKNOWN).
+      const ACTIVE_CLINICAL: HealthStatus[] = [
+        HealthStatus.SICK,
+        HealthStatus.QUARANTINE,
+        HealthStatus.RECOVERING,
+        HealthStatus.DECEASED,
+      ];
+      const currentHealth = bovine.healthStatus;
       const finalHealth =
-        prevHealth && (HEALTH_PRIORITY[prevHealth] ?? 0) > (HEALTH_PRIORITY[newBovineHealth] ?? 0)
-          ? prevHealth
+        currentHealth && ACTIVE_CLINICAL.includes(currentHealth)
+          ? currentHealth
           : newBovineHealth;
 
       // Actualizar snapshot

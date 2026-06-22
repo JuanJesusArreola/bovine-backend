@@ -23,6 +23,7 @@ import BovineDeath, { DeathCause } from '../models/BovineDeath';
 import BovineHealthSnapshot from '../models/BovineHealthSnapshot';
 import BovineLocationHistory from '../models/BovineLocationHistory';
 import LocationCapacity from '../models/LocationCapacity';
+import Location from '../models/Location';
 import BovineDiseaseCase, { CaseStatus, CaseOutcome } from '../models/BovineDiseaseCase';
 import Event, { EventType, EventStatus, EventPriority } from '../models/Event';
 
@@ -298,10 +299,31 @@ export class BovineDeathService {
       buckets.set(key, (buckets.get(key) ?? 0) + 1);
     }
 
+    // Para groupBy=location, resolver el NOMBRE de cada ubicación (el bucket
+    // usa el locationId como key; sin esto el label mostraba el UUID).
+    let locationNames: Record<string, string> = {};
+    if (groupBy === 'location') {
+      const ids = Array.from(buckets.keys()).filter((k) => k !== 'sin-ubicacion');
+      if (ids.length) {
+        const locs = await Location.findAll({ where: { id: ids }, attributes: ['id', 'name'] });
+        for (const l of locs) {
+          if (l.name) locationNames[l.id] = l.name;
+        }
+      }
+    }
+
+    const labelFor = (key: string): string => {
+      if (groupBy === 'cause') return deathCauseLabel(key) ?? key;
+      if (groupBy === 'location') {
+        return key === 'sin-ubicacion' ? 'Sin ubicación' : (locationNames[key] ?? key);
+      }
+      return key;
+    };
+
     const groups = Array.from(buckets.entries())
       .map(([key, count]) => ({
         key,
-        label: groupBy === 'cause' ? deathCauseLabel(key) : key,
+        label: labelFor(key),
         count,
         percentage: total > 0 ? parseFloat(((count / total) * 100).toFixed(1)) : 0,
       }))

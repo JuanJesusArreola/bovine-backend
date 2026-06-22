@@ -75,6 +75,8 @@ export interface EventFilters {
     assignedTo?: string;
     veterinarianId?: string;
     isActive?: boolean;
+    // Solo eventos atrasados (vencidos +5h y aún sin ejecutar).
+    overdue?: boolean;
     // Visibilidad por asignación (lo fija el controlador desde el usuario).
     viewerId?: string;
     viewerIsManager?: boolean;
@@ -798,7 +800,13 @@ export class EventService {
      * Construye cláusula WHERE para filtros
      */
     private buildWhereClause(filters: EventFilters): any {
-        const where: any = { isActive: true };
+        const where: any = {};
+
+        // Tri-estado: si viene isActive (true/false) se respeta; si no viene
+        // (filtro "Todos"), no se restringe → se muestran activos e inactivos.
+        if (filters.isActive !== undefined) {
+            where.isActive = filters.isActive;
+        }
 
         if (filters.bovineId) {
             where.bovineId = filters.bovineId;
@@ -819,7 +827,13 @@ export class EventService {
         if (filters.startDate || filters.endDate) {
             where.scheduledDate = {};
             if (filters.startDate) where.scheduledDate[Op.gte] = filters.startDate;
-            if (filters.endDate) where.scheduledDate[Op.lte] = filters.endDate;
+            if (filters.endDate) {
+                // endDate suele venir como fecha sin hora (00:00). La llevamos a
+                // fin de día para incluir los eventos de ESE mismo día.
+                const end = new Date(filters.endDate);
+                end.setHours(23, 59, 59, 999);
+                where.scheduledDate[Op.lte] = end;
+            }
         }
 
         if (filters.assignedTo) {
@@ -828,6 +842,17 @@ export class EventService {
 
         if (filters.veterinarianId) {
             where.veterinarianId = filters.veterinarianId;
+        }
+
+        // Solo atrasados: programado/pospuesto y vencido hace más de 5h.
+        if (filters.overdue) {
+            const cutoff = new Date(Date.now() - OVERDUE_GRACE_MS);
+            where.scheduledDate = { ...(where.scheduledDate ?? {}), [Op.lt]: cutoff };
+            // Si el usuario no eligió un estado explícito, restringimos a los
+            // estados que pueden estar "atrasados" (no completados/cancelados).
+            if (!filters.status?.length) {
+                where.status = { [Op.in]: [EventStatus.SCHEDULED, EventStatus.POSTPONED] };
+            }
         }
 
         // Combinamos múltiples grupos OR con Op.and (no se puede repetir Op.or
